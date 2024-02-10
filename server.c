@@ -30,12 +30,12 @@
 
 
 struct game_user_details{
-	char name[1000];
+	int userid;
 	char ipaddr[INET6_ADDRSTRLEN];
 	int connfd;
 	int ingame;
 	struct game_user_details* next;
-};
+}*user_details;
 
 pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
 
@@ -48,48 +48,233 @@ void *get_in_addr(struct sockaddr *sa){
 }
 
 
+void generate_random_mask(uint8_t *mask) {
+    srand(time(NULL));
 
-void decode_websocket_frame(const char *data, size_t length, char *decoded_data) {
-    if (length < 6) {
-        // Exit the current thread
-        printf("message cannot be less than 6 length\n");
-        pthread_exit(NULL);
+    // Generate a random 32-bit mask
+    for (size_t i = 0; i < 4; ++i) {
+        mask[i] = rand() & 0xFF;
     }
-
-     // Extract basic header information
-    unsigned char fin = (data[0] & 0x80) >> 7;
-    unsigned char opcode = data[0] & 0x0F;
-    unsigned char mask = (data[1] & 0x80) >> 7;
-    size_t payload_length = data[1] & 0x7F;
-    
-    if (payload_length > length - 6) {
-        // Exit the current thread
-        printf("payload length cannot be greater than length\n");
-        pthread_exit(NULL);
-    }
-
-    // Extract masking key
-    const char *masking_key = data + 2;
-
-    // Start of the payload data
-    size_t payload_offset = 6;
-
-    // Decode payload data with masking key
-    for (size_t i = 0; i < payload_length; ++i) {
-        decoded_data[i] = data[payload_offset + i] ^ masking_key[i % 4];
-    }
-
-    // Null-terminate the decoded data
-    decoded_data[payload_length] = '\0';
 }
 
-void calculate_websocket_accept(const char *client_key, char *accept_key) {
+
+// Function to mask payload data
+void mask_payload(uint8_t *payload, size_t payload_length, uint8_t *mask) {
+    for (size_t i = 0; i < payload_length; ++i) {
+        payload[i] ^= mask[i % 4];
+    }
+}
+
+// Function to encode a complete WebSocket frame
+int encode_websocket_frame(
+    uint8_t fin,
+    uint8_t opcode,
+    uint8_t mask,
+    uint64_t payload_length,
+    uint8_t *payload,
+    uint8_t *frame_buffer
+) {
+    // Calculate header size based on payload length
+    int header_size = 2;
+    if (payload_length <= 125) {
+        // Short form
+    } else if (payload_length <= 65535) {
+        // Medium form (2 additional bytes)
+        header_size += 2;
+    } else {
+        // Long form (8 additional bytes)
+        header_size += 8;
+    }
+
+    // Encode header bytes
+    frame_buffer[0] = (fin << 7) | (opcode & 0x0F);
+    frame_buffer[1] = mask << 7;
+    if (payload_length <= 125) {
+        frame_buffer[1] |= payload_length;
+    } else if (payload_length <= 65535) {
+        frame_buffer[1] |= 126;
+        frame_buffer[2] = (payload_length >> 8) & 0xFF;
+        frame_buffer[3] = payload_length & 0xFF;
+    } else {
+        frame_buffer[1] |= 127;
+        uint64_t n = payload_length;
+        for (int i = 8; i >= 1; --i) {
+            frame_buffer[i + 1] = n & 0xFF;
+            n >>= 8;
+        }
+    }
+
+    // Mask payload if requested
+    if (mask) {
+        generate_random_mask(frame_buffer + header_size - 4);
+        mask_payload(payload, payload_length, frame_buffer + header_size - 4);
+    }
+
+    // Copy payload after header
+    memcpy(frame_buffer + header_size, payload, payload_length);
+
+    return header_size + payload_length; // Total frame size
+}
+
+// Function to decode the header of a WebSocket frame
+int decode_websocket_frame_header(
+    uint8_t *frame_buffer,
+    uint8_t *fin,
+    uint8_t *opcode,
+    uint8_t *mask,
+    uint64_t *payload_length
+) {
+    // Extract header bytes and mask
+    *fin = (frame_buffer[0] >> 7) & 1;
+    *opcode = frame_buffer[0] & 0x0F;
+    *mask = (frame_buffer[1] >> 7) & 1;
+    int n = 0;
+    
+
+    // Calculate payload length based on header type
+    *payload_length = frame_buffer[1] & 0x7F;
+    if (*payload_length == 126) {
+        n = 1;
+        *payload_length = *(frame_buffer + 2);
+        *payload_length <<= 8;
+        *payload_length |= *(frame_buffer + 3);
+    } else if (*payload_length == 127) {
+        n = 2;
+        *payload_length = 0;
+        for (int i = 2; i < 10; ++i) {
+            *payload_length = (*payload_length << 8) | *(frame_buffer + i);
+        }
+    }
+
+    return  (2 + (n == 1 ? 2 : (n == 2 ? 8 : 0)));
+}
+
+void send_frame(const uint8_t *frame, size_t length,int connfd) {
+    ssize_t bytes_sent = send(connfd, frame, length, 0);
+    if (bytes_sent == -1) {
+        perror("Send failed");
+    } else {
+        printf("Pong Frame sent to client\n");
+    }
+}
+
+void send_pong(const char *payload, size_t payload_length,int connfd) {
+    uint8_t pong_frame[128];
+    pong_frame[0] = 0xA;
+    pong_frame[1] = (uint8_t)payload_length;
+    memcpy(pong_frame + 2, payload, payload_length);
+    send_frame(pong_frame, payload_length + 2,connfd);
+}
+
+void handle_ping(const uint8_t *data, size_t length,int connfd) {
+    char ping_payload[126];
+    memcpy(ping_payload, data + 2, length - 2);
+    ping_payload[length - 2] = '\0';
+    send_pong(ping_payload, length - 2,connfd);
+}
+
+void handle_close(int connfd) {
+    // Prepare and send a Close frame
+    struct game_user_details* head = user_details;
+    struct game_user_details* current = head;
+    struct game_user_details* prev = NULL;
+    while (current != NULL) {
+        if(connfd == current->userid){
+        	 uint8_t close_frame[] = {0x88, 0x00};
+		 send(connfd, close_frame, sizeof(close_frame), 0);
+		 break;
+        }
+        prev = current;
+        current = current->next;
+    }
+    
+    if(prev == NULL){
+    	
+    	user_details = user_details->next;
+    }
+    else{
+    	prev->next = prev->next->next;
+    }
+    pthread_exit(NULL);
+}
+
+
+// Function to process WebSocket frame and extract data
+int process_websocket_frame(uint8_t *data, size_t length, char **decoded_data,int connfd) {
+    // Decode the header of the WebSocket frame
+    uint8_t fin, opcode, mask;
+    uint64_t payload_length;
+    // Extract masking key
+    uint8_t* masking_key;
+
+    int header_size = decode_websocket_frame_header(data, &fin, &opcode, &mask, &payload_length);
+    if (header_size == -1) {
+        printf("Error decoding WebSocket frame header\n");
+        return -1;
+    }
+    
+    if(mask){
+    	masking_key = header_size + data;
+    	header_size += 2;
+    }
+    
+    header_size += 2;
+    // Start of the payload data
+    size_t payload_offset = header_size;
+    
+    
+    if (opcode == 0x9) {
+        handle_ping(data,length,connfd);
+        *decoded_data = NULL;
+        return 0;
+    } else if (opcode == 0x8) {
+    	printf("closes the connection\n");
+        handle_close(connfd);
+    }
+
+    // Allocate memory for decoded data
+    *decoded_data = (char *)malloc(payload_length + 1);
+   
+    // Unmask payload data
+    
+    if(mask)
+    	for (size_t i = 0; i < payload_length; ++i) {
+	     (*decoded_data)[i] = data[payload_offset + i] ^ masking_key[i % 4];
+	}
+
+    // Null-terminate the decoded data
+    (*decoded_data)[payload_length] = '\0';
+
+    return 0;
+}
+
+// Function to send WebSocket frame to the client
+int send_websocket_frame(int client_socket, uint8_t fin, uint8_t opcode, char *payload) {
+    // Encode the WebSocket frame
+    uint8_t encoded_data[1024];
+    int encoded_size = encode_websocket_frame(fin, opcode, 0, strlen(payload), ( uint8_t *)payload, encoded_data);
+
+    // Send the encoded message back to the client
+    ssize_t bytes_sent = send(client_socket, encoded_data, encoded_size, 0);
+    if (bytes_sent == -1) {
+        perror("Send failed");
+        return -1;
+    }
+
+    printf("Message sent to client\n");
+
+    return 0;
+}
+
+
+
+void calculate_websocket_accept( char *client_key, char *accept_key) {
     char combined_key[1024];
     strcpy(combined_key, client_key);
     strcat(combined_key, MAGIC_STRING);
 
     unsigned char sha1_hash[SHA_DIGEST_LENGTH];
-    SHA1((const unsigned char *)combined_key, strlen(combined_key), sha1_hash);
+    SHA1(( unsigned char *)combined_key, strlen(combined_key), sha1_hash);
 
     // Base64 encode the SHA-1 hash
     BIO *b64 = BIO_new(BIO_f_base64());
@@ -116,7 +301,7 @@ void calculate_websocket_accept(const char *client_key, char *accept_key) {
 }
 
 
-void handle_websocket_upgrade(int client_socket, const char *request) {
+void handle_websocket_upgrade(int client_socket, char *request) {
     // Check if it's a WebSocket upgrade request
     if (strstr(request, "Upgrade: websocket") == NULL) {
         fprintf(stderr, "Not a WebSocket upgrade request\n");
@@ -137,7 +322,7 @@ void handle_websocket_upgrade(int client_socket, const char *request) {
     calculate_websocket_accept(key_start, accept_key);
 
     // Send WebSocket handshake response
-    const char *upgrade_response_format =
+     char *upgrade_response_format =
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
@@ -205,7 +390,7 @@ int server_creation(){
 
 //connection establishment with the client
 //return connection descriptor to the calling function
-int connection_accepting(int sockfd,struct game_user_details** user_details){
+int connection_accepting(int sockfd){
 	int connfd;
 	struct sockaddr_storage their_addr;
 	struct game_user_details* user_detail = (struct game_user_details*)malloc(sizeof(struct game_user_details));
@@ -235,66 +420,197 @@ int connection_accepting(int sockfd,struct game_user_details** user_details){
 	user_detail->connfd = connfd;
 	strcpy(user_detail->ipaddr,s);
 	user_detail->ingame = 0;
-	user_detail->next = *user_details;
-	*user_details = user_detail;
+	user_detail->next = user_details;
+	user_details = user_detail;
 	
 	return connfd;
 }
 
 
-void encode_websocket_frame(const char *data, char *encoded_data, size_t length) {
-    // Set FIN and opcode (text frame)
-    encoded_data[0] = 0x81;
+char* extractActiveUsersString(struct game_user_details* head,int userid) {
+    // Check if the linked list is empty
+    if (head == NULL) {
+        return strdup("activeUsers  => ");
+    }
+    // Calculate the length of the string
+    int length = 17;
+    struct game_user_details* current = head;
+    while (current != NULL) {
+        if(userid != current->userid && !current->ingame){
+        	length += 6;
+        }
+        current = current->next;
+    }
+    // Allocate memory for the string
+    char* result = (char*)malloc(length + 10);
+    if (result == NULL) {
+        fprintf(stderr, "Memory allocation failed.\n");
+        exit(EXIT_FAILURE);
+    }
 
-    // Set payload length (assuming length <= 125 for simplicity)
-    encoded_data[1] = length;
+    // Construct the string
+    current = head;
+    char* pos = result;
+    pos += snprintf(pos,length,"activeUsers => ");
+    while (current != NULL) {
+     
+        if(userid != current->userid && !(current->ingame)){
+        	pos += snprintf(pos, length + 1, "%d, ", current->userid);
+        }
+        current = current->next;
+    }
+    
+     if (length == 17) {
+        return strdup("activeUsers => ");
+    }
 
-    // Copy the payload data
-    memcpy(encoded_data + 2, data, length);
+    // Remove the trailing " , " and add a null terminator
+    if (length > 17) {
+        *(pos - 2) = '\0';
+    }
+   
+    return result;
+}
+
+void handleGameRequest(int userid,struct game_user_details* head,int RequestUserid){
+    struct game_user_details* current = head;
+    char arr[100];
+    sprintf(arr,"gameRequest => %d",RequestUserid);
+    while (current != NULL) {
+        if(userid == current->userid){
+        	if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
+		    printf("Error sending WebSocket frame\n");
+		}
+        }
+        current = current->next;
+    }
+}
+
+void handleGameRequest(int userid,struct game_user_details* head,int acceptUserid){
+    struct game_user_details* current = head;
+    char arr[100];
+    sprintf(arr,"gameStart => %d",acceptUserid);
+    int flag = 0;
+    while (current != NULL) {
+        if(userid == current->userid && current->userid == 0){
+        	if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
+		    printf("Error sending WebSocket frame\n");
+		}
+		flag = 1;
+        }
+        current = current->next;
+    }
+    
+    if(flag){
+    	sprintf(arr,"gameStart => %d",userid);
+    	if (send_websocket_frame(acceptUserid, 1, 1, arr) != 0) {
+		printf("Error sending WebSocket frame\n");
+	}
+    }
+}
+
+void handleRequestGame(struct game_user_details* head,int userid){
+    struct game_user_details* current = head;
+    char arr[100];
+    sprintf(arr,"gameRequest => %d",userid);
+    while (current != NULL) {
+        if(userid != current->userid && current->ingame == 0){
+        	if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
+		    printf("Error sending WebSocket frame\n");
+		}
+        }
+        current = current->next;
+    }
 }
 
 // Function to handle a single client connection in a thread
-void* handle_game_client(void* user_details) {
+void* handle_game_client() {
    
-    struct game_user_details* user_detail = (struct game_user_details*)user_details;
-   // printf("%s\n",user_details->name);
+    struct game_user_details* user_detail = user_details;
     int connfd = user_detail->connfd;
-    printf("%d\n",user_detail->connfd);
-    printf("%s\n",user_detail->name);
-    printf("%d\n",user_detail->ingame);
+    user_detail->userid = connfd;
+    char arr[100];
+    sprintf(arr,"userid => %d",user_detail->userid);
+    if (send_websocket_frame(connfd, 1, 1, arr) != 0) {
+	   printf("Error sending WebSocket frame\n");
+    }
     
-    // Buffer for received data
-	char received_data[1024];
+    if (send_websocket_frame(connfd, 1, 1, extractActiveUsersString(user_detail,user_detail->userid)) != 0) {
+	   printf("Error sending WebSocket frame\n");
+    }
+    
+    
+    while (1) {
+        // Buffer for received data
+        char received_data[1024];
 
-	// Buffer for decoded data
-	char decoded_data[1024];
+        // Buffer for decoded data
+        char *decoded_data = NULL;
+        
+        // Receive WebSocket frame from the client
+        ssize_t bytes_received = recv(connfd, received_data, sizeof(received_data), 0);
+        if (bytes_received == -1) {
+            perror("Receive failed");
+            close(connfd);
+            continue;
+        }
 
-	// Receive WebSocket frame from the client
-	ssize_t bytes_received = recv(connfd, received_data, sizeof(received_data), 0);
-	if (bytes_received == -1) {
-		perror("Receive failed");
-		close(connfd);
-		exit(0);
+        // Decode the WebSocket frame
+        if (process_websocket_frame(received_data, bytes_received, &decoded_data,connfd) != 0) {
+            printf("Error processing WebSocket frame\n");
+            close(connfd);
+            continue;
+        }
+
+        // Print the decoded data
+        if(decoded_data){
+		printf("Received message from client: %s\n", decoded_data);
+		
+		
+		char* ptr = NULL;
+		if(ptr = strstr(decoded_data,"gameRequest")){
+			ptr += 15;
+			handleGameRequest(atoi(ptr),user_details,connfd);
+			free(decoded_data);
+			continue;
+		}
+		
+		if(ptr = strstr(decoded_data,"requestGame")){
+			handleRequestGame(user_details,connfd);
+			free(decoded_data);
+			continue;
+		}
+		
+		if(ptr = strstr(decoded_data,"acceptGameRequest")){
+			ptr += 21;
+			handleacceptGame(atoi(ptr),user_details,connfd);
+			free(decoded_data);
+			continue;
+		}
+		
+		
+		if(ptr = strstr(decoded_data,"activeUsers")){
+		    if (send_websocket_frame(connfd, 1, 1, extractActiveUsersString(user_details,user_detail->userid)) != 0){
+			   printf("Error sending WebSocket frame\n");
+		    }
+		    free(decoded_data);
+		    continue;
+		}
+    
+			
+		// Send a response WebSocket frame
+		if (send_websocket_frame(connfd, 1, 1, decoded_data) != 0) {
+		    printf("Error sending WebSocket frame\n");
+		}
+		free(decoded_data);
 	}
 
-	// Decode the WebSocket frame
-	decode_websocket_frame(received_data, bytes_received, decoded_data);
 
-	// Print the decoded data
-	printf("Received message from client: %s\n", decoded_data);
-	
-	char encoded_data[1024];
-	encode_websocket_frame("willcome", encoded_data, 8);
+        // Free the memory allocated for decoded data
+        
+    }
 
-	// Send the encoded message back to the client
-	ssize_t bytes_sent = send(connfd, encoded_data, 8 + 2, 0);
-	if (bytes_sent == -1) {
-		perror("Send failed");
-	} else {
-		printf("Message sent to client\n");
-	}	
-		
-        close(connfd);
+   close(connfd);
 }
 
 
@@ -306,19 +622,18 @@ int main(int argc, char* argv[]) {
 	int sockfd,connfd; 
 	sockfd = server_creation();
 	pthread_t thread1;
-	struct game_user_details* user_details;
 	
 	printf("Tic-tac-toe server: waiting for connections...\n");
 	 
 	while(1){ 
-		connfd = connection_accepting(sockfd,&user_details);
+		connfd = connection_accepting(sockfd);
 			
 		if(connfd == -1){
 			continue;
 		}
 		
 		
-		if (pthread_create(&thread1, NULL, handle_game_client,(void*)user_details) != 0) {
+		if (pthread_create(&thread1, NULL, handle_game_client,NULL) != 0) {
 		    perror("pthread_create");
 		    close(connfd);
 		    continue;

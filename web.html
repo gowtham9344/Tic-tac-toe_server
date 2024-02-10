@@ -1,61 +1,178 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebSocket Connection Status</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tic-Tac-Toe Web Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            gap: 5px;
+        }
+
+        .cell {
+            width: 100px;
+            height: 100px;
+            border: 1px solid #000;
+            font-size: 2em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        #game-section {
+            display: none;
+        }
+
+    </style>
+    <script>
+        let ws;
+        let userid;
+        let activeUsersList = [];
+        let gameRequestsList = [];
+        let gameBoard = ['', '', '', '', '', '', '', '', ''];
+
+        function connect() {
+
+            ws = new WebSocket('ws://192.168.23.122:8000');
+
+            ws.onopen = function (event) {
+                document.getElementById('connection-section').style.display = 'none';
+                document.getElementById('game-section').style.display = 'block';
+            };
+
+            ws.onmessage = function (event) {
+                const data = event.data;
+                handleWebSocketMessage(data);
+            };
+
+            ws.onclose = function (event) {
+                console.log('Connection closed');
+                // Handle connection closed
+            };
+
+            ws.onerror = function (event) {
+                console.error('WebSocket error:', event);
+                // Handle WebSocket error
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            const parts = data.split(' => ');
+            const command = parts[0];
+            const content = parts[1];
+
+            switch (command) {
+            	 case 'userid':
+            	     userid = content;
+            	     document.getElementById('user-id').innerHTML = "your user id is " + userid;
+            	     break;
+                case 'activeUsers':
+                    activeUsersList = content.split(', ');
+                    if(activeUsersList.length === 1 && activeUsersList[0] === ""){
+                    	updateActiveUsersListNoUsers();
+                    }
+                    else if(activeUsersList.length != 0){
+                    	updateActiveUsersList();
+                    }
+                    break;
+                case 'gameRequest':
+                    gameRequestsList.push(content);
+                    updateGameRequestsList();
+                    break;
+                case 'gameStart':
+                    // Implement game start logic
+                    break;
+                case 'gameMove':
+                    // Implement game move logic
+                    break;
+                case 'gameOver':
+                    // Implement game over logic
+                    break;
+            }
+        }
+
+        function updateActiveUsersList() {
+            const activeUsersElement = document.getElementById('active-users');
+            activeUsersElement.innerHTML = '';
+            activeUsersList.forEach(user => {
+                const listItem = document.createElement('li');
+                listItem.textContent = user;
+                listItem.onclick = () => sendGameRequest(user);
+                activeUsersElement.appendChild(listItem);
+            });
+        }
+        
+         function updateActiveUsersListNoUsers() {
+            const activeUsersElement = document.getElementById('active-users');
+            activeUsersElement.innerHTML = "NoActiveUsers";
+        }
+
+        function updateGameRequestsList() {
+            const gameRequestsElement = document.getElementById('game-requests');
+            gameRequestsElement.innerHTML = '';
+            gameRequestsList.forEach(user => {
+                const listItem = document.createElement('li');
+                listItem.textContent = `${user} has requested a game`;
+                listItem.onclick = () => acceptGameRequest(user);
+                gameRequestsElement.appendChild(listItem);
+            });
+        }
+        function getActiveUsers(){
+            ws.send("activeUsers");
+        }
+
+        function sendGameRequest(toUser) {
+            ws.send(`gameRequest => ${toUser}`);
+        }
+
+        function acceptGameRequest(fromUser) {
+            ws.send(`acceptGameRequest => ${fromUser}`);
+        }
+
+        function requestGame() {
+            ws.send('requestGame');
+        }
+
+        function terminateConnection() {
+            ws.close();
+        }
+
+        function makeMove(event) {
+            // Implement game move logic
+        }
+
+    </script>
 </head>
 <body>
+    <div id="connection-section">
+        <button onclick="connect()">Connect to join the game pool</button>
+    </div>
 
-<h1>WebSocket Connection Status</h1>
-<p id="status">Connection status: Not connected</p>
+    <div id="game-section" style="display: none;">
+    	<h2  id="user-id" ></h2>
+        <h2>1.Active Users</h2>
+        <ul id="active-users"></ul>
 
-<input type="text" id="messageInput" placeholder="Enter your message">
-<button onclick="sendMessage()">Send Message</button>
+        <h2>2.Game Requests</h2>
+        <ul id="game-requests"></ul>
 
-<div id="messages"></div>
+        <h2>3.Game Board</h2>
+        <div id="game-board" class="board" onclick="makeMove(event)"></div>
 
-<script>
-  const socket = new WebSocket('ws://10.39.17.247:8000');
-
-  socket.onopen = () => {
-    document.getElementById('status').innerText = 'Connection status: Connected';
-    console.log('WebSocket connection opened');
-  };
-
-  socket.onclose = () => {
-    document.getElementById('status').innerText = 'Connection status: Closed';
-    console.log('WebSocket connection closed');
-  };
-
-  socket.onerror = (error) => {
-    document.getElementById('status').innerText = 'Connection status: Error';
-    console.error('WebSocket error:', error);
-  };
-
-  socket.onmessage = (event) => {
-    const message = event.data;
-
-    // Display the received message in the "messages" div
-    const messagesDiv = document.getElementById('messages');
-    messagesDiv.innerHTML += `<p>Received: ${message}</p>`;
-    console.log('Message received:', message);
-  };
-
-  function sendMessage() {
-    const messageInput = document.getElementById('messageInput');
-    const message = messageInput.value;
-
-    if (message.trim() !== '') {
-      socket.send(message);
-      console.log('Message sent:', message);
-    }
-
-    // Clear the input field
-    messageInput.value = '';
-  }
-</script>
-
+	<button onclick="getActiveUsers()">Get active users</button>
+        <button onclick="requestGame()">Request Game</button>
+        <button onclick="terminateConnection()">Terminate Connection</button>
+        
+    </div>
 </body>
 </html>
 
