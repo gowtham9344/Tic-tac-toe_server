@@ -23,8 +23,18 @@
 
 	.board{
 		display:none;
-		text-align:center;
+		width:500px;
+		margin-left:auto;
+		margin-right:auto;
 	}
+        
+        .board-row{
+        	padding-left:200px;
+        }
+        
+        .whole-board{
+        	margin-bottom:10px;
+        }
         
         .square {
 	  background: #fff;
@@ -42,8 +52,19 @@
 	}
 
 	.square:focus {
-	  outline: none;
+	  	outline: none;
 	}
+	
+	ul{
+		list-style-type: none;
+	}
+	
+	ul > div > li{
+		display:inline-block;
+		margin-right:15px;
+		margin-bottom:10px;
+	}
+	
 
     </style>
     <script>
@@ -57,7 +78,7 @@
 
         function connect() {
 
-            ws = new WebSocket('ws://10.39.17.247:8000');
+            ws = new WebSocket('ws://127.0.0.1:8000');
 
             ws.onopen = function (event) {
                 document.getElementById('connection-section').style.display = 'none';
@@ -107,6 +128,7 @@
                     contentSplit = content.split(', ');
                     opuser = contentSplit[0];
                     moveSymbol = contentSplit[1];
+                    disableFunctions();
                     displayGame();
                     
                     break;
@@ -132,6 +154,17 @@
         function displayYourMove(){
             const yourMoveElement = document.getElementById('move-details');
             yourMoveElement.innerHTML = 'This is your turn Please select some tile to Move';
+        }
+        
+        function disableFunctions(){
+            const yourMoveElement = document.getElementById('requests');
+            yourMoveElement.style.display = 'none';
+            const yourMoveElement1 = document.getElementById('getusers');
+            yourMoveElement1.style.display = 'none';
+            const yourMoveElement2 = document.getElementById('requestgame');
+            yourMoveElement2.style.display = 'none';
+            const yourMoveElement3 = document.getElementById('endgame');
+            yourMoveElement3.style.display = 'inline';
         }
         
         function displayMoves(content,Opposymbol){
@@ -161,8 +194,16 @@
         	}
         	
         	setTimeout(function(){
-			const displayGameElement = document.getElementById('move-details');
+			let displayGameElement = document.getElementById('move-details');
 			displayGameElement.innerHTML = '';
+			const yourMoveElement = document.getElementById('requests');
+            		yourMoveElement.style.display = 'block';
+            		const yourMoveElement1 = document.getElementById('getusers');
+		    	yourMoveElement1.style.display = 'inline';
+		    	const yourMoveElement2 = document.getElementById('requestgame');
+		    	yourMoveElement2.style.display = 'inline';
+		    	const yourMoveElement3 = document.getElementById('endgame');
+		    	yourMoveElement3.style.display = 'none';
 			displayNotGame();
         	},10000);
         }
@@ -176,10 +217,15 @@
             const activeUsersElement = document.getElementById('active-users');
             activeUsersElement.innerHTML = '';
             activeUsersList.forEach(user => {
+                const divItem = document.createElement('div');
                 const listItem = document.createElement('li');
+                const buttonItem = document.createElement('button');
                 listItem.textContent = user;
-                listItem.onclick = () => sendGameRequest(user);
-                activeUsersElement.appendChild(listItem);
+                buttonItem.textContent = "click to send request for game";
+                buttonItem.onclick = () => sendGameRequest(user);
+                divItem.appendChild(listItem);
+                divItem.appendChild(buttonItem);
+                activeUsersElement.appendChild(divItem);
             });
         }
         
@@ -192,10 +238,15 @@
             const gameRequestsElement = document.getElementById('game-requests');
             gameRequestsElement.innerHTML = '';
             gameRequestsList.forEach(user => {
+            	 const divItem = document.createElement('div');
                 const listItem = document.createElement('li');
-                listItem.textContent = `${user} has requested a game`;
-                listItem.onclick = () => acceptGameRequest(user);
-                gameRequestsElement.appendChild(listItem);
+                const buttonItem = document.createElement('button');
+                listItem.textContent = user;
+                buttonItem.textContent = "click to accept game request";
+                buttonItem.onclick = () => acceptGameRequest(user);
+                divItem.appendChild(listItem);
+                divItem.appendChild(buttonItem);
+                gameRequestsElement.appendChild(divItem);
             });
         }
         function getActiveUsers(){
@@ -215,6 +266,8 @@
         }
 
         function terminateConnection() {
+            const TerminateElement = document.getElementById('game-section');
+            TerminateElement.innerHTML = 'you are disconnected please refresh the page';
             ws.close();
         }
 
@@ -224,7 +277,6 @@
             gameRequestsElement.disabled = true;
             if(moveName == moveSymbol){
            	 ws.send(`gameMove => ${i}`);
-           	 //disablebuttons();
             }
         }
         
@@ -253,6 +305,9 @@
             		gameRequestsElement.disabled = true;
         	}
         }
+        function Endgame(){
+        	ws.send("endGame");
+        }
 
     </script>
 </head>
@@ -262,35 +317,39 @@
     </div>
 
     <div id="game-section" style="display: none;">
-    	<h2  id="user-id" ></h2>
-        <h2>1.Active Users</h2>
+    	<div id="requests">
+    	<h2 id="user-id"></h2>
+        <h2>Active Users</h2>
         <ul id="active-users"></ul>
 
-        <h2>2.Game Requests</h2>
+        <h2>Game Requests</h2>
         <ul id="game-requests"></ul>
 
-        
+        </div>
         <div id="game-board" class="board">
-        	<h2>3.Game Board</h2>
+        	<h2>Game Board</h2>
         	<p id = "move-details" ></p>
-		<div class="board-row">
-		  <button id="square0" class="square" onclick="makemove(0,moveSymbol)"></button>
-		  <button id="square1" class="square" onclick="makemove(1,moveSymbol)"></button>
-		  <button id="square2" class="square" onclick="makemove(2,moveSymbol)"></button>
-		</div>
-		<div class="board-row">
-		  <button id="square3" class="square" onclick="makemove(3,moveSymbol)"></button>
-		  <button id="square4" class="square" onclick="makemove(4,moveSymbol)"></button>
-		  <button id="square5" class="square" onclick="makemove(5,moveSymbol)"></button>
-		</div>
-		<div class="board-row">
-		  <button id="square6" class="square" onclick="makemove(6,moveSymbol)"></button>
-		  <button id="square7" class="square" onclick="makemove(7,moveSymbol)"></button>
-		  <button id="square8" class="square" onclick="makemove(8,moveSymbol)"></button>
+        	<div class="whole-board">
+			<div class="board-row">
+			  <button id="square0" class="square" onclick="makemove(0,moveSymbol)"></button>
+			  <button id="square1" class="square" onclick="makemove(1,moveSymbol)"></button>
+			  <button id="square2" class="square" onclick="makemove(2,moveSymbol)"></button>
+			</div>
+			<div class="board-row">
+			  <button id="square3" class="square" onclick="makemove(3,moveSymbol)"></button>
+			  <button id="square4" class="square" onclick="makemove(4,moveSymbol)"></button>
+			  <button id="square5" class="square" onclick="makemove(5,moveSymbol)"></button>
+			</div>
+			<div class="board-row">
+			  <button id="square6" class="square" onclick="makemove(6,moveSymbol)"></button>
+			  <button id="square7" class="square" onclick="makemove(7,moveSymbol)"></button>
+			  <button id="square8" class="square" onclick="makemove(8,moveSymbol)"></button>
+			</div>
 		</div>
         </div>
-	<button onclick="getActiveUsers()">Get active users</button>
-        <button onclick="requestGame()">Request Game</button>
+	<button id="getusers" onclick="getActiveUsers()">Get active users</button>
+        <button id="requestgame" onclick="requestGame()">Request Game</button>
+        <button id="endgame" onclick="Endgame()" style="display: none;">End Game</button>
         <button onclick="terminateConnection()">Terminate Connection</button>
         
     </div>
