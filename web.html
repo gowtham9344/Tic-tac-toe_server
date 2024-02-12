@@ -123,7 +123,7 @@
                     updateGameRequestsList();
                     break;
                 case 'gameStart':
-                    console.log("hello");
+
                     defaultboard();
                     contentSplit = content.split(', ');
                     opuser = contentSplit[0];
@@ -145,7 +145,6 @@
                     break;
                 case 'gameOver':
                     displayWinner(content);
-                    console.log(content);
                     opuser = 0;
                     break;
             }
