@@ -34,6 +34,8 @@ struct game_user_details{
 	char ipaddr[INET6_ADDRSTRLEN];
 	int connfd;
 	int ingame;
+	char movename;
+	char board[3][3];
 	struct game_user_details* next;
 }*user_details;
 
@@ -267,7 +269,6 @@ int send_websocket_frame(int client_socket, uint8_t fin, uint8_t opcode, char *p
 }
 
 
-
 void calculate_websocket_accept( char *client_key, char *accept_key) {
     char combined_key[1024];
     strcpy(combined_key, client_key);
@@ -486,27 +487,176 @@ void handleGameRequest(int userid,struct game_user_details* head,int RequestUser
     }
 }
 
-void handleGameRequest(int userid,struct game_user_details* head,int acceptUserid){
+
+//------game logic-------
+
+char checkWin(char board[3][3])
+{
+    for(int i=0;i<3;i++)
+    {
+        if(board[i][0] != ' ' && board[i][0] == board[i][1] && board[i][1] == board[i][2])
+            return 1;
+        if(board[0][i] != ' ' && board[0][i] == board[1][i] && board[1][i] == board[2][i])
+            return 1;
+    }
+    if(board[0][0] != ' ' && board[0][0] == board[1][1] && board[1][1] == board[2][2])
+        return 1;
+    if(board[0][2] != ' ' && board[0][2] == board[1][1] && board[1][1] == board[2][0])
+        return 1;
+    return 0;
+}
+
+int checkDraw(char board[3][3])
+{
+    for(int i=0;i<3;i++)
+    {
+		for(int j=0;j<3;j++)
+		{
+		    if(board[i][j] == ' ')
+		        return 0;
+		}
+    }
+    return 1;
+}
+
+
+void handleacceptGame(int userid,struct game_user_details* head,int acceptUserid){
     struct game_user_details* current = head;
     char arr[100];
-    sprintf(arr,"gameStart => %d",acceptUserid);
+    sprintf(arr,"gameStart => %d, o",acceptUserid);
     int flag = 0;
+    struct game_user_details* accepter = NULL;
     while (current != NULL) {
-        if(userid == current->userid && current->userid == 0){
+        if(userid == current->userid && current->ingame == 0){
         	if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
 		    printf("Error sending WebSocket frame\n");
 		}
+		current->ingame = acceptUserid;
+		current->movename = 'o';
 		flag = 1;
+		
+		sprintf(arr,"OpponentTurn");
+		if(send_websocket_frame(current->connfd,1,1, arr) != 0){
+			printf("Error sending WebSocket frame\n");
+		}
+        }
+        if(acceptUserid == current->userid){
+        	accepter = current;
         }
         current = current->next;
     }
     
     if(flag){
-    	sprintf(arr,"gameStart => %d",userid);
+    	sprintf(arr,"gameStart => %d, x",userid);
+    	accepter->ingame = userid;
+    	accepter->movename = 'x';
     	if (send_websocket_frame(acceptUserid, 1, 1, arr) != 0) {
 		printf("Error sending WebSocket frame\n");
 	}
+	sprintf(arr,"yourTurn");
+	if(send_websocket_frame(acceptUserid,1,1, arr) != 0){
+		printf("Error sending WebSocket frame\n");
+	}
     }
+}
+
+void updateboard(int userid1,int userid2,int i,int j,char movename){
+	struct game_user_details* current = user_details;
+	
+	while(current != NULL){
+		if(userid1 == current->userid){
+			current->board[i][j] = movename;
+		}
+		else if(userid2 == current->userid){
+			current->board[i][j] = movename;
+		}
+		current = current->next;
+	}
+}
+
+void updateDetails(int userid1,int userid2){
+	struct game_user_details* current = user_details;
+	
+	while(current != NULL){
+		if(userid1 == current->userid){
+			for(int i=0;i<3;i++){
+			    	for(int j=0;j<3;j++){
+			    		current->board[i][j] = ' ';
+			    	}
+		    	}
+		    	
+		    	current->ingame = 0;
+		}
+		if(userid2 == current->userid){
+			for(int i=0;i<3;i++){
+			    	for(int j=0;j<3;j++){
+			    		current->board[i][j] = ' ';
+			    	}
+		   	}
+		   	current->ingame = 0;
+		}
+		current = current->next;
+	}
+}
+
+void handleGamemove(int move,struct game_user_details* head,int senderUserid){
+
+    struct game_user_details* current = user_details;
+    char arr[100];
+    int i = move/3,j = move%3;
+    
+    while (current != NULL) {
+    	
+        if(senderUserid == current->userid){
+        	updateboard(senderUserid,current->ingame,i,j,current->movename);
+     		printf("hello\n");
+        	if(checkWin(current->board)){
+        		sprintf(arr,"gameOver => %d",senderUserid);
+        		if (send_websocket_frame(current->ingame, 1, 1, arr) != 0) {
+			    printf("Error sending WebSocket frame\n");
+			}
+			if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
+			    printf("Error sending WebSocket frame\n");
+			}
+        		updateDetails(senderUserid,current->ingame);
+        		break;
+        	}
+        	printf("hello\n");
+        	if(checkDraw(current->board)){
+        		sprintf(arr,"gameOver => %d",0);
+        		if (send_websocket_frame(current->ingame, 1, 1, arr) != 0) {
+			    printf("Error sending WebSocket frame\n");
+			}
+			if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
+			    printf("Error sending WebSocket frame\n");
+			}
+        		updateDetails(senderUserid,current->ingame);
+        		break;
+        	}
+        	
+		printf("hello\n");
+		sprintf(arr,"gameMove => %d",move);
+                
+        	if (send_websocket_frame(current->ingame, 1, 1, arr) != 0) {
+		    printf("Error sending WebSocket frame\n");
+		}
+		
+		sprintf(arr,"yourTurn");
+		if(send_websocket_frame(current->ingame,1,1, arr) != 0){
+			printf("Error sending WebSocket frame\n");
+		}
+		
+		sprintf(arr,"OpponentTurn");
+		if(send_websocket_frame(current->connfd,1,1, arr) != 0){
+			printf("Error sending WebSocket frame\n");
+		}
+		printf("hello\n");
+		break;
+        }
+        current = current->next;
+    }
+    
+    
 }
 
 void handleRequestGame(struct game_user_details* head,int userid){
@@ -525,10 +675,15 @@ void handleRequestGame(struct game_user_details* head,int userid){
 
 // Function to handle a single client connection in a thread
 void* handle_game_client() {
-   
+    
     struct game_user_details* user_detail = user_details;
     int connfd = user_detail->connfd;
     user_detail->userid = connfd;
+    for(int i=0;i<3;i++){
+    	for(int j=0;j<3;j++){
+    		user_detail->board[i][j] = ' ';
+    	}
+    }
     char arr[100];
     sprintf(arr,"userid => %d",user_detail->userid);
     if (send_websocket_frame(connfd, 1, 1, arr) != 0) {
@@ -588,6 +743,12 @@ void* handle_game_client() {
 			continue;
 		}
 		
+		if(ptr = strstr(decoded_data,"gameMove")){
+			ptr += 12;
+			handleGamemove(atoi(ptr),user_details,connfd);
+			free(decoded_data);
+			continue;
+		}
 		
 		if(ptr = strstr(decoded_data,"activeUsers")){
 		    if (send_websocket_frame(connfd, 1, 1, extractActiveUsersString(user_details,user_detail->userid)) != 0){
@@ -596,8 +757,7 @@ void* handle_game_client() {
 		    free(decoded_data);
 		    continue;
 		}
-    
-			
+
 		// Send a response WebSocket frame
 		if (send_websocket_frame(connfd, 1, 1, decoded_data) != 0) {
 		    printf("Error sending WebSocket frame\n");
@@ -612,9 +772,6 @@ void* handle_game_client() {
 
    close(connfd);
 }
-
-
-
 
 
 int main(int argc, char* argv[]) {

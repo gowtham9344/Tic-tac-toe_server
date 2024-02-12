@@ -11,26 +11,39 @@
             margin: 20px;
         }
 
-        .board {
-            display: grid;
-            grid-template-columns: repeat(3, 100px);
-            gap: 5px;
-        }
-
-        .cell {
-            width: 100px;
-            height: 100px;
-            border: 1px solid #000;
-            font-size: 2em;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-
         #game-section {
             display: none;
         }
+        
+        .board-row:after {
+	  clear: both;
+	  content: "";
+	  display: table;
+	}
+
+	.board{
+		display:none;
+		text-align:center;
+	}
+        
+        .square {
+	  background: #fff;
+	  border: 1px solid #999;
+	  float: left;
+	  font-size: 24px;
+	  font-weight: bold;
+	  line-height: 34px;
+	  height: 34px;
+	  margin-right: -1px;
+	  margin-top: -1px;
+	  padding: 0;
+	  text-align: center;
+	  width: 34px;
+	}
+
+	.square:focus {
+	  outline: none;
+	}
 
     </style>
     <script>
@@ -38,11 +51,13 @@
         let userid;
         let activeUsersList = [];
         let gameRequestsList = [];
-        let gameBoard = ['', '', '', '', '', '', '', '', ''];
+        let opuser = 0;
+        let moveSymbol = '';
+        let contentSplit = [];
 
         function connect() {
 
-            ws = new WebSocket('ws://192.168.23.122:8000');
+            ws = new WebSocket('ws://10.39.17.247:8000');
 
             ws.onopen = function (event) {
                 document.getElementById('connection-section').style.display = 'none';
@@ -56,12 +71,10 @@
 
             ws.onclose = function (event) {
                 console.log('Connection closed');
-                // Handle connection closed
             };
 
             ws.onerror = function (event) {
                 console.error('WebSocket error:', event);
-                // Handle WebSocket error
             };
         }
 
@@ -89,17 +102,76 @@
                     updateGameRequestsList();
                     break;
                 case 'gameStart':
-                    // Implement game start logic
+                    console.log("hello");
+                    defaultboard();
+                    contentSplit = content.split(', ');
+                    opuser = contentSplit[0];
+                    moveSymbol = contentSplit[1];
+                    displayGame();
+                    
+                    break;
+                case 'yourTurn':
+                    displayYourMove();
+                    enablebuttons();
+                    break;
+                case 'OpponentTurn':
+                    displayOpponentMove();
+                    disablebuttons();
                     break;
                 case 'gameMove':
-                    // Implement game move logic
+                    displayMoves(content,moveSymbol == 'x' ? 'o' : 'x');
                     break;
                 case 'gameOver':
-                    // Implement game over logic
+                    displayWinner(content);
+                    console.log(content);
+                    opuser = 0;
                     break;
             }
         }
+        
+        function displayYourMove(){
+            const yourMoveElement = document.getElementById('move-details');
+            yourMoveElement.innerHTML = 'This is your turn Please select some tile to Move';
+        }
+        
+        function displayMoves(content,Opposymbol){
+            makemove(content,Opposymbol);
+        }
+        
+        function displayOpponentMove(){
+            const yourMoveElement = document.getElementById('move-details');
+            yourMoveElement.innerHTML = `This is opponent turn with user id is ${opuser}. Please wait until he moves`;
+        }
+        
+        function displayGame(){
+        	const displayGameElement = document.getElementById('game-board');
+        	displayGameElement.style.display = 'block';
+        }
+        
+        function displayWinner(content){
+        	const displayGameElement = document.getElementById('move-details');
+        	if(content == 0){
+        		displayGameElement.innerHTML = "It's is a tie";
+        	}
+        	else if( userid == content){
+        		displayGameElement.innerHTML = 'you are the winner!!!';
+        	}
+        	else{
+        		displayGameElement.innerHTML = 'Better luck next time';
+        	}
+        	
+        	setTimeout(function(){
+			const displayGameElement = document.getElementById('move-details');
+			displayGameElement.innerHTML = '';
+			displayNotGame();
+        	},10000);
+        }
 
+	function displayNotGame(){
+		const displayGameElement = document.getElementById('game-board');
+        	displayGameElement.style.display = 'none';
+	}
+	
         function updateActiveUsersList() {
             const activeUsersElement = document.getElementById('active-users');
             activeUsersElement.innerHTML = '';
@@ -146,8 +218,40 @@
             ws.close();
         }
 
-        function makeMove(event) {
-            // Implement game move logic
+        function makemove(i,moveName) {
+            const gameRequestsElement = document.getElementById(`square${i}`);
+            gameRequestsElement.innerHTML = moveName;
+            gameRequestsElement.disabled = true;
+            if(moveName == moveSymbol){
+           	 ws.send(`gameMove => ${i}`);
+           	 //disablebuttons();
+            }
+        }
+        
+        function enablebuttons(){
+        	let i = 0;
+        	for(i = 0 ;i < 9;i++){
+        		const gameRequestsElement = document.getElementById(`square${i}`);
+        		if(gameRequestsElement.innerHTML == ''){
+            			gameRequestsElement.disabled = false;
+            		}
+        	}
+        }
+        
+        function defaultboard(){
+        	let i = 0;
+        	for(i = 0 ;i < 9;i++){
+        		let gameRequestsElement = document.getElementById(`square${i}`);
+        		gameRequestsElement.innerHTML = '';
+        	}
+        }
+        
+        function disablebuttons(){
+        	let i = 0;
+        	for(i = 0 ;i < 9;i++){
+        		const gameRequestsElement = document.getElementById(`square${i}`);
+            		gameRequestsElement.disabled = true;
+        	}
         }
 
     </script>
@@ -165,9 +269,26 @@
         <h2>2.Game Requests</h2>
         <ul id="game-requests"></ul>
 
-        <h2>3.Game Board</h2>
-        <div id="game-board" class="board" onclick="makeMove(event)"></div>
-
+        
+        <div id="game-board" class="board">
+        	<h2>3.Game Board</h2>
+        	<p id = "move-details" ></p>
+		<div class="board-row">
+		  <button id="square0" class="square" onclick="makemove(0,moveSymbol)"></button>
+		  <button id="square1" class="square" onclick="makemove(1,moveSymbol)"></button>
+		  <button id="square2" class="square" onclick="makemove(2,moveSymbol)"></button>
+		</div>
+		<div class="board-row">
+		  <button id="square3" class="square" onclick="makemove(3,moveSymbol)"></button>
+		  <button id="square4" class="square" onclick="makemove(4,moveSymbol)"></button>
+		  <button id="square5" class="square" onclick="makemove(5,moveSymbol)"></button>
+		</div>
+		<div class="board-row">
+		  <button id="square6" class="square" onclick="makemove(6,moveSymbol)"></button>
+		  <button id="square7" class="square" onclick="makemove(7,moveSymbol)"></button>
+		  <button id="square8" class="square" onclick="makemove(8,moveSymbol)"></button>
+		</div>
+        </div>
 	<button onclick="getActiveUsers()">Get active users</button>
         <button onclick="requestGame()">Request Game</button>
         <button onclick="terminateConnection()">Terminate Connection</button>
