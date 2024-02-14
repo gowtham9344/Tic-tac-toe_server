@@ -143,31 +143,24 @@ int decode_websocket_frame_header(
     return  (2 + (n == 1 ? 2 : (n == 2 ? 8 : 0)));
 }
 
-void send_frame(const uint8_t *frame, size_t length,int connfd) {
-    ssize_t bytes_sent = send(connfd, frame, length, 0);
-    if (bytes_sent == -1) {
-        perror("Send failed");
-    } else {
-        printf("Pong Frame sent to client\n");
+
+void handle_ping(const uint8_t *data, size_t length,int connfd) {
+
+    if (length >= 1 && data[0] == 0x9) {
+        // Send a pong frame in response
+        uint8_t pong_frame[2] = {0x8A, 0x00};  
+        ssize_t bytes_sent = send(connfd, pong_frame, sizeof(pong_frame), 0);
+
+        if (bytes_sent == -1) {
+            perror("Send failed");
+        } else {
+            printf("Pong Frame sent to client\n");
+        }
     }
 }
 
-void send_pong(const char *payload, size_t payload_length,int connfd) {
-    uint8_t pong_frame[128];
-    pong_frame[0] = 0xA;
-    pong_frame[1] = (uint8_t)payload_length;
-    memcpy(pong_frame + 2, payload, payload_length);
-    send_frame(pong_frame, payload_length + 2,connfd);
-}
-
-void handle_ping(const uint8_t *data, size_t length,int connfd) {
-    char ping_payload[126];
-    memcpy(ping_payload, data + 2, length - 2);
-    ping_payload[length - 2] = '\0';
-    send_pong(ping_payload, length - 2,connfd);
-}
-
 void handle_close(int connfd) {
+
     struct game_user_details* head = user_details;
     struct game_user_details* current = head;
     struct game_user_details* prev = NULL;
@@ -197,11 +190,12 @@ void handle_close(int connfd) {
     else{
     	prev->next = prev->next->next;
     }
+    pthread_mutex_unlock( &mutex1 );
     pthread_exit(NULL);
 }
 
 
-int process_websocket_frame(uint8_t *data, size_t length, char **decoded_data,int connfd) {
+int process_websocket_frame(uint8_t *data, size_t length, char **decoded_data,int connfd,int* flag) {
 
     uint8_t fin, opcode, mask;
     uint64_t payload_length;
@@ -226,9 +220,11 @@ int process_websocket_frame(uint8_t *data, size_t length, char **decoded_data,in
     if (opcode == 0x9) {
         handle_ping(data,length,connfd);
         *decoded_data = NULL;
-        return 0;
+        *flag = 1;
+        return 1;
     } else if (opcode == 0x8) {
     	printf("closes the connection\n");
+    	pthread_mutex_lock( &mutex1 );
         handle_close(connfd);
     }
 
@@ -408,7 +404,7 @@ int connection_accepting(int sockfd){
             handle_websocket_upgrade(connfd, buffer);
         }
 
-        
+        pthread_mutex_lock( &mutex1 );
 	user_detail->connfd = connfd;
 	strcpy(user_detail->ipaddr,s);
 	user_detail->ingame = 0;
@@ -510,6 +506,7 @@ void handleacceptGame(int userid,struct game_user_details* head,int acceptUserid
     sprintf(arr,"gameStart => %d, o",acceptUserid);
     int flag = 0;
     struct game_user_details* accepter = NULL;
+    pthread_mutex_lock( &mutex1 );
     while (current != NULL) {
         if(userid == current->userid && current->ingame == 0){
         	if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
@@ -542,6 +539,7 @@ void handleacceptGame(int userid,struct game_user_details* head,int acceptUserid
 		printf("Error sending WebSocket frame\n");
 	}
     }
+    pthread_mutex_unlock( &mutex1 );
 }
 
 void updateboard(int userid1,int userid2,int i,int j,char movename){
@@ -592,7 +590,9 @@ void handleGamemove(int move,struct game_user_details* head,int senderUserid){
     while (current != NULL) {
     	
         if(senderUserid == current->userid){
+        	pthread_mutex_lock( &mutex1 );
         	updateboard(senderUserid,current->ingame,i,j,current->movename);
+        	pthread_mutex_unlock( &mutex1 );
         	if(checkWin(current->board)){
         		sprintf(arr,"gameMove => %d",move);
 			if (send_websocket_frame(current->ingame, 1, 1, arr) != 0) {
@@ -606,7 +606,9 @@ void handleGamemove(int move,struct game_user_details* head,int senderUserid){
 			if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
 			    printf("Error sending WebSocket frame\n");
 			}
+			pthread_mutex_lock( &mutex1 );
         		updateDetails(senderUserid,current->ingame);
+        		pthread_mutex_unlock( &mutex1 );
         		break;
         	}
         	if(checkDraw(current->board)){
@@ -623,7 +625,9 @@ void handleGamemove(int move,struct game_user_details* head,int senderUserid){
 			if (send_websocket_frame(current->connfd, 1, 1, arr) != 0) {
 			    printf("Error sending WebSocket frame\n");
 			}
+			pthread_mutex_lock( &mutex1 );
         		updateDetails(senderUserid,current->ingame);
+        		pthread_mutex_unlock( &mutex1 );
         		break;
         	}
 		sprintf(arr,"gameMove => %d",move);
@@ -658,7 +662,9 @@ void handleEndGame(struct game_user_details* userdetail,int userid){
 	if (send_websocket_frame(userdetail->connfd, 1, 1, arr) != 0) {
 		printf("Error sending WebSocket frame\n");
 	}
+	 pthread_mutex_lock( &mutex1 );
         updateDetails(userdetail->ingame,userdetail->connfd);
+        pthread_mutex_unlock( &mutex1 );
 }
 
 void handleRequestGame(struct game_user_details* head,int userid){
@@ -685,7 +691,11 @@ void* handle_game_client() {
     		user_detail->board[i][j] = ' ';
     	}
     }
+    
+    pthread_mutex_unlock( &mutex1 );
     char arr[100];
+    int flag = 0;
+    
     sprintf(arr,"userid => %d",user_detail->userid);
     if (send_websocket_frame(connfd, 1, 1, arr) != 0) {
 	   printf("Error sending WebSocket frame\n");
@@ -708,11 +718,17 @@ void* handle_game_client() {
             continue;
         }
         
-        if (process_websocket_frame(received_data, bytes_received, &decoded_data,connfd) != 0) {
+        if (process_websocket_frame(received_data, bytes_received, &decoded_data,connfd,&flag) != 0) {
             printf("Error processing WebSocket frame\n");
             close(connfd);
             continue;
         }
+        
+        if(flag == 1){
+        	flag = 0;
+        	continue;
+        }
+        
 
         if(decoded_data){
 		printf("Received message from client: %s\n", decoded_data);
