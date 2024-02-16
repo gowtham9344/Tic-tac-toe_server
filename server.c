@@ -44,6 +44,7 @@ pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
 
 int send_websocket_frame(int client_socket, uint8_t fin, uint8_t opcode, char *payload);
 void updateDetails(int userid1,int userid2);
+void activeuserssend();
 
 void *get_in_addr(struct sockaddr *sa){
 	if(sa->sa_family == AF_INET){
@@ -190,6 +191,7 @@ void handle_close(int connfd) {
     else{
     	prev->next = prev->next->next;
     }
+    activeuserssend();
     pthread_mutex_unlock( &mutex1 );
     pthread_exit(NULL);
 }
@@ -221,7 +223,7 @@ int process_websocket_frame(uint8_t *data, size_t length, char **decoded_data,in
         handle_ping(data,length,connfd);
         *decoded_data = NULL;
         *flag = 1;
-        return 1;
+        return 0;
     } else if (opcode == 0x8) {
     	printf("closes the connection\n");
     	pthread_mutex_lock( &mutex1 );
@@ -455,6 +457,19 @@ char* extractActiveUsersString(struct game_user_details* head,int userid) {
     return result;
 }
 
+
+void activeuserssend(){
+	struct game_user_details* head = user_details;
+	struct game_user_details* current = head;
+	
+	while(current!=NULL){
+		 if (send_websocket_frame(current->connfd, 1, 1, extractActiveUsersString(user_details,current->userid)) != 0) {
+		   	printf("Error sending WebSocket frame\n");
+	    	 }
+		 current = current->next;
+	}
+}
+
 void handleGameRequest(int userid,struct game_user_details* head,int RequestUserid){
     struct game_user_details* current = head;
     char arr[100];
@@ -467,6 +482,7 @@ void handleGameRequest(int userid,struct game_user_details* head,int RequestUser
         }
         current = current->next;
     }
+    
 }
 
 
@@ -539,6 +555,7 @@ void handleacceptGame(int userid,struct game_user_details* head,int acceptUserid
 		printf("Error sending WebSocket frame\n");
 	}
     }
+    activeuserssend();
     pthread_mutex_unlock( &mutex1 );
 }
 
@@ -608,6 +625,7 @@ void handleGamemove(int move,struct game_user_details* head,int senderUserid){
 			}
 			pthread_mutex_lock( &mutex1 );
         		updateDetails(senderUserid,current->ingame);
+        		activeuserssend();
         		pthread_mutex_unlock( &mutex1 );
         		break;
         	}
@@ -627,6 +645,7 @@ void handleGamemove(int move,struct game_user_details* head,int senderUserid){
 			}
 			pthread_mutex_lock( &mutex1 );
         		updateDetails(senderUserid,current->ingame);
+        		activeuserssend();
         		pthread_mutex_unlock( &mutex1 );
         		break;
         	}
@@ -664,6 +683,7 @@ void handleEndGame(struct game_user_details* userdetail,int userid){
 	}
 	 pthread_mutex_lock( &mutex1 );
         updateDetails(userdetail->ingame,userdetail->connfd);
+        activeuserssend();
         pthread_mutex_unlock( &mutex1 );
 }
 
@@ -701,10 +721,7 @@ void* handle_game_client() {
 	   printf("Error sending WebSocket frame\n");
     }
     
-    if (send_websocket_frame(connfd, 1, 1, extractActiveUsersString(user_detail,user_detail->userid)) != 0) {
-	   printf("Error sending WebSocket frame\n");
-    }
-    
+    activeuserssend();
     
     while (1) {
         char received_data[1024];
