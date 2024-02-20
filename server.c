@@ -191,7 +191,6 @@ void handle_close(int connfd) {
     else{
     	prev->next = prev->next->next;
     }
-    
     activeuserssend();
     pthread_mutex_unlock( &mutex1 );
     pthread_exit(NULL);

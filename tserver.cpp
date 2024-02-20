@@ -134,6 +134,7 @@ class TcpServer
 class WebSocketServer{
     public:
     TcpServer tcp;
+    char upgrade_response_format[200] = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n";
 
     WebSocketServer(){
         
@@ -218,63 +219,65 @@ class WebSocketServer{
     }
 
 
-    void calculateWebsocketAccept(char *client_key,char *accept_key) {
-        char combined_key[1024];
-        strcpy(combined_key, client_key);
-        strcat(combined_key, MAGIC_STRING);
+    void calculateWebSocketAccept(const char *clientKey, char *acceptKey) {
+	char combinedKey[1024] = "";
+	strcpy(combinedKey, clientKey);
+	strcat(combinedKey, MAGIC_STRING);
 
-        unsigned char sha1_hash[SHA_DIGEST_LENGTH];
-        SHA1(( unsigned char *)combined_key, strlen(combined_key), sha1_hash);
+	unsigned char sha1Hash[SHA_DIGEST_LENGTH];
+	SHA1(reinterpret_cast<const unsigned char*>(combinedKey), strlen(combinedKey), sha1Hash);
 
-        BIO *b64 = BIO_new(BIO_f_base64());
-        BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+	BIO* b64 = BIO_new(BIO_f_base64());
+	BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
 
-        BIO *bio = BIO_new(BIO_s_mem());
-        BIO_push(b64, bio);
+	BIO* bio = BIO_new(BIO_s_mem());
+	BIO_push(b64, bio);
 
-        BIO_write(b64, sha1_hash, SHA_DIGEST_LENGTH);
-        BIO_flush(b64);
+	BIO_write(b64, sha1Hash, SHA_DIGEST_LENGTH);
+	BIO_flush(b64);
 
-        BUF_MEM *bptr;
-        BIO_get_mem_ptr(b64, &bptr);
+	BUF_MEM* bptr;
+	BIO_get_mem_ptr(b64, &bptr);
 
-        strcpy(accept_key, bptr->data);
+	strcpy(acceptKey, bptr->data);
 
+	size_t len = strlen(acceptKey);
+	if (len > 0 && acceptKey[len - 1] == '\n') {
+	acceptKey[len - 1] = '\0';
+	}
 
-        size_t len = strlen(accept_key);
-        if (len > 0 && accept_key[len - 1] == '\n') {
-            accept_key[len - 1] = '\0';
-        }
-
-        BIO_free_all(b64);
+	BIO_free_all(b64);
     }
+
 
     void handleWebsocketUpgrade(int client_socket, char *request) {
 
-        if (strstr(request, "Upgrade: websocket") == NULL) {
-            fprintf(stderr, "Not a WebSocket upgrade request\n");
-            return;
-        }
+           if (strstr(request, "Upgrade: websocket") == nullptr) {
+		std::cerr << "Not a WebSocket upgrade request" << std::endl;
+		return;
+	    }
 
-        char *key_start = strstr(request, "Sec-WebSocket-Key: ") + 19;
-        char *key_end = strchr(key_start, '\r');
-        
-        if (!key_start || !key_end) {
-            fprintf(stderr, "Invalid Sec-WebSocket-Key header\n");
-            return;
-        }
-        *key_end = '\0';
+	    const char* key_start = strstr(request, "Sec-WebSocket-Key: ") + 19;
+	    const char* key_end = strchr(key_start, '\r');
 
-        char accept_key[1024];
-        calculateWebsocketAccept(key_start, accept_key);
+	    if (!key_start || !key_end) {
+		std::cerr << "Invalid Sec-WebSocket-Key header" << std::endl;
+		return;
+	    }
 
-        char upgrade_response_format[] = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n";
-        char response[2048];
-        int len = sprintf(response, upgrade_response_format, accept_key);
-        response[len] = '\0';
-        len = tcp.sendRequest(client_socket, response, strlen(response));
-        cout<<"length:"<<len<<endl;
-        cout<<"WebSocket handshake complete"<<endl;
+	    char client_key[1024]="";
+	    strncpy(client_key, key_start, key_end - key_start);
+	    client_key[key_end - key_start] = '\0';
+
+	    char accept_key[1024]="";
+	    calculateWebSocketAccept(client_key, accept_key);
+
+	    char response[300]="";
+	    int len = sprintf(response, upgrade_response_format, accept_key);
+	    response[len] = '\0';
+            len = tcp.sendRequest(client_socket, response, strlen(response));
+            cout<<"length:"<<len<<endl;
+            cout<<"WebSocket handshake complete"<<endl;
     }
 
     void handlePing(const uint8_t *data, size_t length,int client_socket) {
@@ -376,9 +379,12 @@ class WebSocketServer{
         uint8_t data[2048]; 
         size_t length = 2048;
         int len = 0;
+        cout<<"length:"<<len<<endl;
         if((len = tcp.getResponse(client_socket,data,length)) == -1){
             return -1; 
         }
+
+        cout<<"length:"<<len<<endl;
 
         return processWebsocketFrame(data,length,decodedData,client_socket);
     }
@@ -553,6 +559,7 @@ class TicTacToeServer{
         }
         activeuserssend();
         close(connfd);
+        mtx.unlock();
         pthread_exit(NULL);
     }
 
@@ -612,7 +619,6 @@ class TicTacToeServer{
             }
             current = current->next;
         }
-        
     }
 
     void handleGameMove(int move,int senderUserid){
@@ -777,8 +783,10 @@ class TicTacToeServer{
                 int flag = 0;
 
                 if ((flag = websocket.recvWebSocketFrame(&decodedData, userDetail->connfd)) == -1) {
+                    cout<<flag<<endl;
+                    mtx.lock();
                     handleClose(userDetail->connfd);
-                    continue;
+                    break;
                 }
 
                 // ping frame
@@ -791,7 +799,6 @@ class TicTacToeServer{
                     websocket.sendCloseFrame(userDetail->connfd);
                     mtx.lock();
                     handleClose(userDetail->connfd);
-                    mtx.unlock();
                     break;
                 }
 
@@ -871,7 +878,7 @@ class TicTacToeServer{
 };
 
 int main(){
-    signal(SIGPIPE,SIG_IGN);
+    //signal(SIGPIPE,SIG_IGN);
     TicTacToeServer tttserver;
     tttserver.startServer();
     return 0;
