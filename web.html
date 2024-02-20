@@ -121,14 +121,12 @@
                     updateGameRequestsList();
                     break;
                 case 'gameStart':
-
                     defaultboard();
                     contentSplit = content.split(', ');
                     opuser = contentSplit[0];
                     moveSymbol = contentSplit[1];
                     disableFunctions();
                     displayGame();
-                    
                     break;
                 case 'yourTurn':
                     displayYourMove();

@@ -11,22 +11,23 @@
 #include <openssl/buffer.h>
 #include <openssl/evp.h>
 #include <errno.h>
+#include <signal.h>
+#include <thread>
+#include <mutex>
 
 #define SA struct sockaddr 
 #define MAGIC_STRING "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+#define PORT "8000"
+#define BACKLOG 100
 
 using namespace std;
 
 class TcpServer
 {   
     int socketfd;
-    int backlog;
-    char* port;
 
     public:
-        TcpServer(int backlog,char* port){
-            this->backlog = backlog;
-            this->port = port;
+        TcpServer(){
             serverCreation();
         }
 
@@ -56,19 +57,19 @@ class TcpServer
         }
 
         int sendRequest(int client_socket,uint8_t * buff,int len){
-           return send(client_socket,buff,len,0);
+           return write(client_socket,buff,len);
         }
 
         int getResponse(int client_socket,uint8_t * buff,int len){
-            return recv(client_socket,buff,len,0);
+            return read(client_socket,buff,len);
         }
 
         int sendRequest(int client_socket,char * buff,int len){
-           return send(client_socket,buff,len,0);
+           return write(client_socket,buff,len);
         }
 
         int getResponse(int client_socket,char * buff,int len){
-            return recv(client_socket,buff,len,0);
+            return read(client_socket,buff,len);
         }
 
         
@@ -84,7 +85,7 @@ class TcpServer
             hints.ai_flags = AI_PASSIVE;// my ip
             
             // set the address of the server with the port info.
-            if((rv = getaddrinfo(NULL,port,&hints,&servinfo)) != 0){
+            if((rv = getaddrinfo(NULL,PORT,&hints,&servinfo)) != 0){
                 fprintf(stderr, "getaddrinfo: %s\n",gai_strerror(rv));	
                 return;
             }
@@ -115,7 +116,7 @@ class TcpServer
             }
             
             // server will be listening with maximum simultaneos connections of BACKLOG
-            if(listen(socketfd,backlog) == -1){ 
+            if(listen(socketfd,BACKLOG) == -1){ 
                 perror("listen");
                 exit(1); 
             } 
@@ -131,12 +132,13 @@ class TcpServer
 
 
 class WebSocketServer{
-    TcpServer tcp = TcpServer(10,"8000");
-
     public:
+    TcpServer tcp;
+
     WebSocketServer(){
         
     }
+
     private:
     void generateRandomMask(uint8_t *mask) {
         srand(time(NULL));
@@ -266,16 +268,12 @@ class WebSocketServer{
         char accept_key[1024];
         calculateWebsocketAccept(key_start, accept_key);
 
-        char *upgrade_response_format =
-            "HTTP/1.1 101 Switching Protocols\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Accept: %s\r\n\r\n";
-
+        char upgrade_response_format[] = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n";
         char response[2048];
-        sprintf(response, upgrade_response_format, accept_key);
-        tcp.sendRequest(client_socket, response, strlen(response));
-
+        int len = sprintf(response, upgrade_response_format, accept_key);
+        response[len] = '\0';
+        len = tcp.sendRequest(client_socket, response, strlen(response));
+        cout<<"length:"<<len<<endl;
         cout<<"WebSocket handshake complete"<<endl;
     }
 
@@ -295,7 +293,7 @@ class WebSocketServer{
     }
 
 
-    int processWebsocketFrame(uint8_t *data, size_t length, char **decoded_data,int client_socket) {
+    int processWebsocketFrame(uint8_t *data, size_t length, char **decodedData,int client_socket) {
         uint8_t fin, opcode, mask;
         uint64_t payload_length;
         uint8_t* masking_key;
@@ -315,33 +313,38 @@ class WebSocketServer{
         
         size_t payload_offset = header_size;
         
-        
+        printf("opcode:%x\n",opcode);
         if (opcode == 0x9) {
             handlePing(data,length,client_socket);
-            *decoded_data = NULL;
+            *decodedData = NULL;
             return 1; // return code for ping request
         } else if (opcode == 0x8) {
-            printf("closes the connection\n");
+            cout<<"closes the connection"<<endl;
             return 2; // return code for close connection
         }
+        printf("opcode:%x\n",opcode);
 
-        *decoded_data = (char *)malloc(payload_length + 1);
+        *decodedData = (char *)malloc(payload_length + 1);
 
         
         if(mask)
             for (size_t i = 0; i < payload_length; ++i) {
-            (*decoded_data)[i] = data[payload_offset + i] ^ masking_key[i % 4];
+            (*decodedData)[i] = data[payload_offset + i] ^ masking_key[i % 4];
         }
 
-        (*decoded_data)[payload_length] = '\0';
-        return 0; // return code for ping / normal data
+        (*decodedData)[payload_length] = '\0';
+        //printf("#message length:%d\n",strlen(*decodedData));
+        return 0; // return code for normal data
     }
 
     public:
     int webSocketCreate(){
         char buffer[2048];
         int client_socket = tcp.connection_accepting();
-        tcp.getResponse(client_socket,buffer,2048);
+        int len = tcp.getResponse(client_socket,buffer,2048);
+        buffer[len] = '\0';
+        printf("buffer:%s\n",buffer);
+        
         handleWebsocketUpgrade(client_socket,buffer);
         return client_socket;
     }
@@ -349,34 +352,527 @@ class WebSocketServer{
     void sendCloseFrame(int client_socket) {
         uint8_t close_frame[] = {0x88, 0x00};
         tcp.sendRequest(client_socket, close_frame, sizeof(close_frame));
+        cout<<"close frame sent to the client"<<endl;
     }
 
     int sendWebsocketFrame(int client_socket, uint8_t fin, uint8_t opcode, char *payload) {
 
         uint8_t encoded_data[1024];
+
         int encoded_size = encodeWebsocketFrameHeader(fin, opcode, 0, strlen(payload), ( uint8_t *)payload, encoded_data);
 
-
         ssize_t bytes_sent = tcp.sendRequest(client_socket, encoded_data, encoded_size);
+        cout<<"bytes_send"<<bytes_sent<<endl;
         if (bytes_sent == -1) {
             perror("Send failed");
-            return -1;
+            return 0;
         }
 
         cout<<"Message sent to client"<<endl;
-        return bytes_sent;
+        return 0;
     }
 
-    int recvWebSocketFrame(char **decoded_data,int client_socket){
+    int recvWebSocketFrame(char **decodedData,int client_socket){
         uint8_t data[2048]; 
         size_t length = 2048;
+        int len = 0;
+        if((len = tcp.getResponse(client_socket,data,length)) == -1){
+            return -1; 
+        }
 
-        tcp.getResponse(client_socket,data,length);
-        return processWebsocketFrame(data,length,decoded_data,client_socket);
+        return processWebsocketFrame(data,length,decodedData,client_socket);
     }
+};
 
+struct gameUserDetails{
+	int userid;
+	int connfd;
+	int inGameWith;
+	char moveName;
+	char board[3][3];
+	struct gameUserDetails* next;
+
+    gameUserDetails(int userid,int connfd,int inGameWith){
+        this->userid = userid;
+        this->connfd = connfd;
+        this->inGameWith = inGameWith;
+        for(int i=0;i<3;i++){
+            for(int j=0;j<3;j++){
+                this->board[i][j] = ' ';
+            }
+        }
+        this->next = NULL;
+    }
 };
 
 class TicTacToeServer{
+    public:
+        struct gameUserDetails *userDetails = NULL;
+        WebSocketServer websocket = WebSocketServer();
+        mutex mtx;
+
+    void startServer(){
+        cout<<"Tic-tac-toe server: waiting for connections..."<<endl;
+        while(1){ 
+            cout<<"client"<<endl;
+            int connfd = addClient();
+            printf("connfd:%d\n",connfd);
+                
+            if(connfd == -1){
+                continue;
+            }
+
+            mtx.lock();
+            thread myThread(&TicTacToeServer::handleGameClient,this,connfd);
+            myThread.detach();
+            cout<<"client1"<<endl;
+        }
+    }
+
+    int addClient(){
+        int connfd = websocket.webSocketCreate();
+        if(connfd == -1){
+            return -1;
+        }
+        struct gameUserDetails* userDetail = new gameUserDetails(connfd,connfd,0);
+        userDetail->next = userDetails;
+        userDetails = userDetail;
+        return connfd;
+    }
+
+    char* extractActiveUsersString(int userid) {
+        int length = 17;
+        struct gameUserDetails* current = userDetails;
+        if (current == NULL) {
+            return strdup("activeUsers  => ");
+        }
+        
+
+        while (current != NULL) {
+            cout<<"hello\n";
+            if(userid != current->userid && !current->inGameWith){
+                length += 6;
+            }
+            current = current->next;
+        }
+        
+        char* result = (char*)malloc(length + 10);
+        if (result == NULL) {
+            fprintf(stderr, "Memory allocation failed.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        current = userDetails;
+        char* pos = result;
+        pos += snprintf(pos,length,"activeUsers => ");
+        while (current != NULL) {
+        
+            if(userid != current->userid && !(current->inGameWith)){
+                pos += snprintf(pos, length + 1, "%d, ", current->userid);
+            }
+            current = current->next;
+        }
+        
+        if (length == 17) {
+            return strdup("activeUsers => ");
+        }
+
+        if (length > 17) {
+            *(pos - 2) = '\0';
+        }
     
+        return result;
+    }
+
+    void activeuserssend(){
+        struct gameUserDetails* current = userDetails;
+        printf("hello\n");
+        while(current!=NULL){
+            
+            if (websocket.sendWebsocketFrame(current->connfd, 1, 1, extractActiveUsersString(current->userid)) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            
+            current = current->next;
+        }
+        
+        display_details();
+        printf("hello\n");
+    }
+
+    void updateDetails(int userid1,int userid2){
+        struct gameUserDetails* current = userDetails;
+        
+        while(current != NULL){
+            if(userid1 == current->userid){
+                for(int i=0;i<3;i++){
+                        for(int j=0;j<3;j++){
+                            current->board[i][j] = ' ';
+                        }
+                    }
+                    
+                    current->inGameWith = 0;
+            }
+            if(userid2 == current->userid){
+                for(int i=0;i<3;i++){
+                        for(int j=0;j<3;j++){
+                            current->board[i][j] = ' ';
+                        }
+                }
+                current->inGameWith = 0;
+            }
+            current = current->next;
+        }
+    }
+
+    void handleClose(int connfd) {
+        struct gameUserDetails* current = userDetails;
+        struct gameUserDetails* prev = NULL;
+
+        while (current != NULL) {
+            if(connfd == current->userid){
+                if(current->inGameWith != 0){
+                        char arr[100];
+                        sprintf(arr,"gameOver => %d",current->inGameWith);
+                        if (websocket.sendWebsocketFrame(current->inGameWith,1,1,arr) != 0) {
+                            cout<<"Error sending WebSocket frame"<<endl;
+                        }
+                        updateDetails(current->userid,current->inGameWith);
+                }
+                break;
+            }
+            prev = current;
+            current = current->next;
+        }
+        
+        if(prev == NULL){
+            userDetails = userDetails->next;
+        }
+        else{
+            prev->next = prev->next->next;
+        }
+        activeuserssend();
+        close(connfd);
+        pthread_exit(NULL);
+    }
+
+
+    char checkWin(char board[3][3])
+    {
+        for(int i=0;i<3;i++)
+        {
+            if(board[i][0] != ' ' && board[i][0] == board[i][1] && board[i][1] == board[i][2])
+                return 1;
+            if(board[0][i] != ' ' && board[0][i] == board[1][i] && board[1][i] == board[2][i])
+                return 1;
+        }
+        if(board[0][0] != ' ' && board[0][0] == board[1][1] && board[1][1] == board[2][2])
+            return 1;
+        if(board[0][2] != ' ' && board[0][2] == board[1][1] && board[1][1] == board[2][0])
+            return 1;
+        return 0;
+    }
+
+    int checkDraw(char board[3][3])
+    {
+        for(int i=0;i<3;i++)
+        {
+            for(int j=0;j<3;j++)
+            {
+                if(board[i][j] == ' ')
+                    return 0;
+            }
+        }
+        return 1;
+    }
+
+    void updateboard(int userid1,int userid2,int i,int j,char movename){
+        struct gameUserDetails* current = userDetails;
+        
+        while(current != NULL){
+            if(userid1 == current->userid){
+                current->board[i][j] = movename;
+            }
+            else if(userid2 == current->userid){
+                current->board[i][j] = movename;
+            }
+            current = current->next;
+        }
+    }
+
+    void handleGameRequest(int userid,int RequestUserid){
+        struct gameUserDetails* current = userDetails;
+        char arr[100];
+        sprintf(arr,"gameRequest => %d",RequestUserid);
+        while (current != NULL) {
+            if(userid == current->userid){
+                if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+            }
+            current = current->next;
+        }
+        
+    }
+
+    void handleGameMove(int move,int senderUserid){
+
+        struct gameUserDetails* current = userDetails;
+        char arr[100];
+        int i = move/3,j = move%3;
+        
+        while (current != NULL) {
+            
+            if(senderUserid == current->userid){
+                    updateboard(senderUserid,current->inGameWith,i,j,current->moveName);
+                if(checkWin(current->board)){
+                    sprintf(arr,"gameMove => %d",move);
+                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
+                        cout<<"Error sending WebSocket frame"<<endl;
+                    }
+                    sprintf(arr,"gameOver => %d",senderUserid);
+                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
+                        cout<<"Error sending WebSocket frame"<<endl;
+                    }
+                    if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
+                        cout<<"Error sending WebSocket frame"<<endl;
+                    }
+                    updateDetails(senderUserid,current->inGameWith);
+                    activeuserssend();
+                    break;
+                }
+                if(checkDraw(current->board)){
+                    sprintf(arr,"gameMove => %d",move);
+                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
+                        cout<<"Error sending WebSocket frame"<<endl;
+                    }
+                    sprintf(arr,"gameOver => %d",0);
+                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
+                        cout<<"Error sending WebSocket frame"<<endl;
+                    }
+                    if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
+                        cout<<"Error sending WebSocket frame"<<endl;
+                    }
+                    
+                    updateDetails(senderUserid,current->inGameWith);
+                    activeuserssend();
+                    break;
+                }
+                sprintf(arr,"gameMove => %d",move);
+                        
+                if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+                
+                sprintf(arr,"yourTurn");
+                if(websocket.sendWebsocketFrame(current->inGameWith,1,1, arr) != 0){
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+                
+                sprintf(arr,"OpponentTurn");
+                if(websocket.sendWebsocketFrame(current->connfd,1,1, arr) != 0){
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+                break;
+            }
+            current = current->next;
+        }
+        
+    }
+
+
+    void handleEndGame(struct gameUserDetails* userDetail,int userid){
+        char arr[100];		
+        sprintf(arr,"gameOver => %d",userDetail->inGameWith);
+        if (websocket.sendWebsocketFrame(userDetail->inGameWith, 1, 1, arr) != 0) {
+            cout<<"Error sending WebSocket frame"<<endl;
+        }
+        if (websocket.sendWebsocketFrame(userDetail->connfd, 1, 1, arr) != 0) {
+            cout<<"Error sending WebSocket frame"<<endl;
+        }
+        updateDetails(userDetail->inGameWith,userDetail->connfd);
+        activeuserssend();
+    }
+
+    void handleRequestGame(int userid){
+        struct gameUserDetails* current = userDetails;
+        char arr[100];
+        sprintf(arr,"gameRequest => %d",userid);
+        while (current != NULL) {
+            if(userid != current->userid && current->inGameWith == 0){
+                if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+            }
+            current = current->next;
+        }
+    }
+
+    void handleAcceptGame(int userid,int acceptUserid){
+        struct gameUserDetails* current = userDetails;
+        char arr[100];
+        sprintf(arr,"gameStart => %d, o",acceptUserid);
+        int flag = 0;
+        struct gameUserDetails* accepter = NULL;
+
+        while (current != NULL) {
+            if(userid == current->userid && current->inGameWith == 0){
+                if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+                current->inGameWith = acceptUserid;
+                current->moveName = 'o';
+                flag = 1;
+            
+                sprintf(arr,"OpponentTurn");
+                if(websocket.sendWebsocketFrame(current->connfd,1,1, arr) != 0){
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+            }
+            if(acceptUserid == current->userid){
+                accepter = current;
+            }
+            current = current->next;
+        }
+        
+        if(flag){
+            sprintf(arr,"gameStart => %d, x",userid);
+            accepter->inGameWith = userid;
+            accepter->moveName = 'x';
+            if (websocket.sendWebsocketFrame(acceptUserid, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            sprintf(arr,"yourTurn");
+            if(websocket.sendWebsocketFrame(acceptUserid,1,1, arr) != 0){
+               cout<<"Error sending WebSocket frame"<<endl;
+            }
+        }
+        activeuserssend();
+    }
+
+    void display_details(){
+        struct gameUserDetails* current = userDetails;
+
+        printf("\n\ncurrent user details\n\n");
+        while(current!=NULL){
+            printf("$%d\n",current->connfd);
+            current = current->next;
+        }
+    }
+
+    void handleGameClient(int connfd) {
+        struct gameUserDetails* userDetail = userDetails;
+        char arr[100];
+
+        sprintf(arr, "userid => %d", userDetail->userid);
+        if (websocket.sendWebsocketFrame(userDetail->connfd, 1, 1, arr) != 0) {
+            cout << "Error sending WebSocket frame" << endl;
+        }
+        mtx.unlock();
+        activeuserssend();
+        
+
+            while (1) {
+                char* decodedData = NULL;
+                int flag = 0;
+
+                if ((flag = websocket.recvWebSocketFrame(&decodedData, userDetail->connfd)) == -1) {
+                    handleClose(userDetail->connfd);
+                    continue;
+                }
+
+                // ping frame
+                if (flag == 1) {
+                    continue;
+                }
+
+                // close frame
+                if (flag == 2) {
+                    websocket.sendCloseFrame(userDetail->connfd);
+                    mtx.lock();
+                    handleClose(userDetail->connfd);
+                    mtx.unlock();
+                    break;
+                }
+
+                if (decodedData) {
+                    cout << "Received message from client: " << decodedData << endl;
+
+                    char* ptr = NULL;
+
+                    if (ptr = strstr(decodedData, "gameRequest")) {
+                        ptr += 15;
+                        mtx.lock();
+                        handleGameRequest(atoi(ptr), userDetail->connfd);
+                        free(decodedData);
+                        mtx.unlock();
+                        continue;
+                    }
+
+                    if (ptr = strstr(decodedData, "requestGame")) {
+                        mtx.lock();
+                        handleRequestGame(userDetail->connfd);
+                        free(decodedData);
+                        mtx.unlock();
+                        continue;
+                    }
+
+                    if (ptr = strstr(decodedData, "acceptGameRequest")) {
+                        ptr += 21;
+                        mtx.lock();
+                        handleAcceptGame(atoi(ptr), userDetail->connfd);
+                        free(decodedData);
+                        mtx.unlock();
+                        continue;
+                    }
+
+                    if (ptr = strstr(decodedData, "gameMove")) {
+                        ptr += 12;
+                        mtx.lock();
+                        handleGameMove(atoi(ptr), userDetail->connfd);
+                        free(decodedData);
+                        mtx.unlock();
+                        continue;
+                    }
+
+                    if (ptr = strstr(decodedData, "endGame")) {
+                        mtx.lock();
+                        handleEndGame(userDetail, userDetail->connfd);
+                        free(decodedData);
+                        mtx.unlock();
+                        continue;
+                    }
+
+                    if (ptr = strstr(decodedData, "activeUsers")) {
+                        if (websocket.sendWebsocketFrame(userDetail->connfd, 1, 1, extractActiveUsersString(userDetail->userid)) != 0) {
+                            cout << "Error sending WebSocket frame" << endl;
+                        }
+                        free(decodedData);
+                        continue;
+                    }
+
+                    if(strlen(decodedData) == 0){
+                        mtx.lock();
+                        handleClose(userDetail->connfd);
+                        mtx.unlock();
+                        break;
+                    }
+
+
+                    if (!strlen(decodedData))
+                        free(decodedData);
+                }
+        }
+        close(userDetail->connfd);
+        free(userDetail);
+    }
+
+
 };
+
+int main(){
+    signal(SIGPIPE,SIG_IGN);
+    TicTacToeServer tttserver;
+    tttserver.startServer();
+    return 0;
+}
