@@ -222,8 +222,10 @@ class WebSocketServer{
     void calculateWebSocketAccept(const char *clientKey, char *acceptKey) {
 	char combinedKey[1024] = "";
 	strcpy(combinedKey, clientKey);
+	//cout<<"clientkey:"<<clientKey<<endl;
 	strcat(combinedKey, MAGIC_STRING);
-
+	//cout<<"combinedkey:"<<combinedKey<<endl;
+	memset(acceptKey,'\0',50);
 	unsigned char sha1Hash[SHA_DIGEST_LENGTH];
 	SHA1(reinterpret_cast<const unsigned char*>(combinedKey), strlen(combinedKey), sha1Hash);
 
@@ -242,9 +244,12 @@ class WebSocketServer{
 	strcpy(acceptKey, bptr->data);
 
 	size_t len = strlen(acceptKey);
+	
 	if (len > 0 && acceptKey[len - 1] == '\n') {
 	acceptKey[len - 1] = '\0';
 	}
+	acceptKey[28] = '\0';
+	//cout<<"acceptKey:"<<acceptKey<<endl;
 
 	BIO_free_all(b64);
     }
@@ -269,14 +274,15 @@ class WebSocketServer{
 	    strncpy(client_key, key_start, key_end - key_start);
 	    client_key[key_end - key_start] = '\0';
 
-	    char accept_key[1024]="";
+	    char accept_key[50]="";
 	    calculateWebSocketAccept(client_key, accept_key);
 
 	    char response[300]="";
 	    int len = sprintf(response, upgrade_response_format, accept_key);
 	    response[len] = '\0';
+	    //cout<<"response:"<<response<<endl;
             len = tcp.sendRequest(client_socket, response, strlen(response));
-            cout<<"length:"<<len<<endl;
+            //cout<<"length:"<<len<<endl;
             cout<<"WebSocket handshake complete"<<endl;
     }
 
