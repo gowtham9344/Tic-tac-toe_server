@@ -193,6 +193,8 @@
         	setTimeout(function(){
 			let displayGameElement = document.getElementById('move-details');
 			displayGameElement.innerHTML = '';
+            gameRequestsList = [];
+            updateGameRequestsList();
 			const yourMoveElement = document.getElementById('requests');
             		yourMoveElement.style.display = 'block';
             		const yourMoveElement1 = document.getElementById('getusers');
@@ -235,7 +237,7 @@
             const gameRequestsElement = document.getElementById('game-requests');
             gameRequestsElement.innerHTML = '';
             gameRequestsList.forEach(user => {
-            	 const divItem = document.createElement('div');
+            	const divItem = document.createElement('div');
                 const listItem = document.createElement('li');
                 const buttonItem = document.createElement('button');
                 listItem.textContent = user;
