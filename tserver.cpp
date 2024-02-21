@@ -136,10 +136,6 @@ class WebSocketServer{
     TcpServer tcp;
     char upgrade_response_format[200] = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n";
 
-    WebSocketServer(){
-        
-    }
-
     private:
     void generateRandomMask(uint8_t *mask) {
         srand(time(NULL));
@@ -322,7 +318,7 @@ class WebSocketServer{
         
         size_t payload_offset = header_size;
         
-        printf("opcode:%x\n",opcode);
+        //printf("opcode:%x\n",opcode);
         if (opcode == 0x9) {
             handlePing(data,length,client_socket);
             *decodedData = NULL;
@@ -331,7 +327,7 @@ class WebSocketServer{
             cout<<"closes the connection"<<endl;
             return 2; // return code for close connection
         }
-        printf("opcode:%x\n",opcode);
+        //printf("opcode:%x\n",opcode);
 
         *decodedData = (char *)malloc(payload_length + 1);
 
@@ -352,7 +348,7 @@ class WebSocketServer{
         int client_socket = tcp.connection_accepting();
         int len = tcp.getResponse(client_socket,buffer,2048);
         buffer[len] = '\0';
-        printf("buffer:%s\n",buffer);
+       // printf("buffer:%s\n",buffer);
         
         handleWebsocketUpgrade(client_socket,buffer);
         return client_socket;
@@ -371,7 +367,7 @@ class WebSocketServer{
         int encoded_size = encodeWebsocketFrameHeader(fin, opcode, 0, strlen(payload), ( uint8_t *)payload, encoded_data);
 
         ssize_t bytes_sent = tcp.sendRequest(client_socket, encoded_data, encoded_size);
-        cout<<"bytes_send"<<bytes_sent<<endl;
+        //cout<<"bytes_send"<<bytes_sent<<endl;
         if (bytes_sent == -1) {
             perror("Send failed");
             return 0;
@@ -385,12 +381,12 @@ class WebSocketServer{
         uint8_t data[2048]; 
         size_t length = 2048;
         int len = 0;
-        cout<<"length:"<<len<<endl;
+        //cout<<"length:"<<len<<endl;
         if((len = tcp.getResponse(client_socket,data,length)) == -1){
             return -1; 
         }
 
-        cout<<"length:"<<len<<endl;
+        //cout<<"length:"<<len<<endl;
 
         return processWebsocketFrame(data,length,decodedData,client_socket);
     }
@@ -426,9 +422,9 @@ class TicTacToeServer{
     void startServer(){
         cout<<"Tic-tac-toe server: waiting for connections..."<<endl;
         while(1){ 
-            cout<<"client"<<endl;
+           // cout<<"client"<<endl;
             int connfd = addClient();
-            printf("connfd:%d\n",connfd);
+            //printf("connfd:%d\n",connfd);
                 
             if(connfd == -1){
                 continue;
@@ -437,7 +433,7 @@ class TicTacToeServer{
             mtx.lock();
             thread myThread(&TicTacToeServer::handleGameClient,this,connfd);
             myThread.detach();
-            cout<<"client1"<<endl;
+           // cout<<"client1"<<endl;
         }
     }
 
@@ -461,7 +457,7 @@ class TicTacToeServer{
         
 
         while (current != NULL) {
-            cout<<"hello\n";
+           // cout<<"hello\n";
             if(userid != current->userid && !current->inGameWith){
                 length += 6;
             }
@@ -498,7 +494,7 @@ class TicTacToeServer{
 
     void activeuserssend(){
         struct gameUserDetails* current = userDetails;
-        printf("hello\n");
+        //printf("hello\n");
         while(current!=NULL){
             
             if (websocket.sendWebsocketFrame(current->connfd, 1, 1, extractActiveUsersString(current->userid)) != 0) {
@@ -508,8 +504,8 @@ class TicTacToeServer{
             current = current->next;
         }
         
-        display_details();
-        printf("hello\n");
+       // display_details();
+        //printf("hello\n");
     }
 
     void updateDetails(int userid1,int userid2){
@@ -789,7 +785,7 @@ class TicTacToeServer{
                 int flag = 0;
 
                 if ((flag = websocket.recvWebSocketFrame(&decodedData, userDetail->connfd)) == -1) {
-                    cout<<flag<<endl;
+                    //cout<<flag<<endl;
                     mtx.lock();
                     handleClose(userDetail->connfd);
                     break;
@@ -884,7 +880,6 @@ class TicTacToeServer{
 };
 
 int main(){
-    //signal(SIGPIPE,SIG_IGN);
     TicTacToeServer tttserver;
     tttserver.startServer();
     return 0;
