@@ -504,7 +504,7 @@ class TicTacToeServer{
             current = current->next;
         }
         
-       // display_details();
+        // display_details();
         //printf("hello\n");
     }
 
@@ -632,7 +632,7 @@ class TicTacToeServer{
         while (current != NULL) {
             
             if(senderUserid == current->userid){
-                    updateboard(senderUserid,current->inGameWith,i,j,current->moveName);
+                updateboard(senderUserid,current->inGameWith,i,j,current->moveName);
                 if(checkWin(current->board)){
                     sprintf(arr,"gameMove => %d",move);
                     if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
@@ -761,9 +761,9 @@ class TicTacToeServer{
     void display_details(){
         struct gameUserDetails* current = userDetails;
 
-        printf("\n\ncurrent user details\n\n");
+        cout<<"\n\ncurrent user details\n\n";
         while(current!=NULL){
-            printf("$%d\n",current->connfd);
+            cout<<current->connfd<<endl;
             current = current->next;
         }
     }
