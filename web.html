@@ -180,6 +180,9 @@
         
         function displayWinner(content){
         	const displayGameElement = document.getElementById('move-details');
+        	const yourMoveElement3 = document.getElementById('endgame');
+		yourMoveElement3.style.display = 'none';
+		
         	if(content == 0){
         		displayGameElement.innerHTML = "It's is a tie";
         	}
@@ -190,19 +193,18 @@
         		displayGameElement.innerHTML = 'Better luck next time';
         	}
         	
+        	
         	setTimeout(function(){
 			let displayGameElement = document.getElementById('move-details');
 			displayGameElement.innerHTML = '';
-            gameRequestsList = [];
-            updateGameRequestsList();
+		        gameRequestsList = [];
+		        updateGameRequestsList();
 			const yourMoveElement = document.getElementById('requests');
             		yourMoveElement.style.display = 'block';
             		const yourMoveElement1 = document.getElementById('getusers');
 		    	yourMoveElement1.style.display = 'inline';
 		    	const yourMoveElement2 = document.getElementById('requestgame');
 		    	yourMoveElement2.style.display = 'inline';
-		    	const yourMoveElement3 = document.getElementById('endgame');
-		    	yourMoveElement3.style.display = 'none';
 			displayNotGame();
         	},10000);
         }
