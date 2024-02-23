@@ -22,6 +22,8 @@
 
 using namespace std;
 
+
+// tcp server class used to create a server and accept clients and give the functionality to send and receive messages.
 class TcpServer
 {   
     int socketfd;
@@ -56,18 +58,23 @@ class TcpServer
             return connfd;
         }
 
+
+	// send request in the uint8_t* form to the client connected to the client_socket with the length len
         int sendRequest(int client_socket,uint8_t * buff,int len){
            return write(client_socket,buff,len);
         }
 
+	// receive request in the uint8_t* form from the client connected to the client_socket with the maximum length len
         int getResponse(int client_socket,uint8_t * buff,int len){
             return read(client_socket,buff,len);
         }
 
+	// send request in the char* form to the client connected to the client_socket with the length len
         int sendRequest(int client_socket,char * buff,int len){
            return write(client_socket,buff,len);
         }
 
+	// receive request in the char* form from the client connected to the client_socket with the maximum length len
         int getResponse(int client_socket,char * buff,int len){
             return read(client_socket,buff,len);
         }
@@ -75,6 +82,8 @@ class TcpServer
         
 
     private:
+    
+    	// create a server in the port mentioned in the MACRO PORT
         void serverCreation(){
             struct addrinfo hints,*servinfo,*p;
             int yes = 1;
@@ -121,7 +130,9 @@ class TcpServer
                 exit(1); 
             } 
         }
-
+        
+        
+	// return the ip address of the given sockaddr structure
         void *get_in_addr(struct sockaddr *sa){
             if(sa->sa_family == AF_INET){
                 return &(((struct sockaddr_in*)sa)->sin_addr);	
@@ -131,12 +142,16 @@ class TcpServer
 };
 
 
+
+// websocketserver gives the functionality of the tcp to websocket upgrade and frame encoding and decoding of messages send and receive using websocket 
 class WebSocketServer{
     public:
     TcpServer tcp;
     char upgrade_response_format[200] = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n";
 
     private:
+    
+    //generate a random mask for encoding the frame
     void generateRandomMask(uint8_t *mask) {
         srand(time(NULL));
 
@@ -144,13 +159,15 @@ class WebSocketServer{
             mask[i] = rand() & 0xFF;
         }
     }
-
+ 
+    //mask the payload using the mask values
     void maskPayload(uint8_t *payload, size_t payload_length, uint8_t *mask) {
         for (size_t i = 0; i < payload_length; ++i) {
             payload[i] ^= mask[i % 4];
         }
     }
 
+   // encode the message in the websocket frame format
     int encodeWebsocketFrameHeader(uint8_t fin,uint8_t opcode,uint8_t mask,uint64_t payload_length,uint8_t *payload,uint8_t *frame_buffer) {
         int header_size = 2;
         if (payload_length <= 125) {
@@ -188,6 +205,7 @@ class WebSocketServer{
         return header_size + payload_length; 
     }
 
+    // decode the websocket frame to get the message 
     int decodeWebsocketFrameHeader(uint8_t *frame_buffer,uint8_t *fin,uint8_t *opcode,
         uint8_t *mask,uint64_t *payload_length
     ) {
@@ -215,6 +233,8 @@ class WebSocketServer{
     }
 
 
+   // calculate the sha1 for given clientkey and encode to the base64 format to get acceptket to be send in the handshaking process of 
+   // websocket connection
     void calculateWebSocketAccept(const char *clientKey, char *acceptKey) {
 	char combinedKey[1024] = "";
 	strcpy(combinedKey, clientKey);
@@ -251,6 +271,7 @@ class WebSocketServer{
     }
 
 
+   // receive upgrade message and send the correct message for the given upgrade request.
     void handleWebsocketUpgrade(int client_socket, char *request) {
 
            if (strstr(request, "Upgrade: websocket") == nullptr) {
@@ -282,6 +303,8 @@ class WebSocketServer{
             cout<<"WebSocket handshake complete"<<endl;
     }
 
+
+   // handle ping frame received from the client by sending pong frame 
     void handlePing(const uint8_t *data, size_t length,int client_socket) {
 
         if (length >= 1 && data[0] == 0x9) {
@@ -297,7 +320,7 @@ class WebSocketServer{
         }
     }
 
-
+   // get data and handle the messages based on the opcode recieved
     int processWebsocketFrame(uint8_t *data, size_t length, char **decodedData,int client_socket) {
         uint8_t fin, opcode, mask;
         uint64_t payload_length;
@@ -343,6 +366,7 @@ class WebSocketServer{
     }
 
     public:
+    // creation of websocket
     int webSocketCreate(){
         char buffer[2048];
         int client_socket = tcp.connection_accepting();
@@ -353,12 +377,14 @@ class WebSocketServer{
         return client_socket;
     }
 
+   // send close frame for client closing.
     void sendCloseFrame(int client_socket) {
         uint8_t close_frame[] = {0x88, 0x00};
         tcp.sendRequest(client_socket, close_frame, sizeof(close_frame));
         cout<<"close frame sent to the client"<<endl;
     }
 
+    // send messages in the websocket frame format.
     int sendWebsocketFrame(int client_socket, uint8_t fin, uint8_t opcode, char *payload) {
 
         uint8_t encoded_data[1024];
@@ -375,7 +401,8 @@ class WebSocketServer{
         cout<<"Message sent to client"<<endl;
         return 0;
     }
-
+ 
+    // receive messages in the websocket frame format.
     int recvWebSocketFrame(char **decodedData,int client_socket){
         uint8_t data[2048]; 
         size_t length = 2048;
@@ -389,6 +416,7 @@ class WebSocketServer{
     }
 };
 
+// structure for each client 
 struct gameUserDetails{
 	int userid;
 	int connfd;
@@ -410,6 +438,8 @@ struct gameUserDetails{
     }
 };
 
+
+// gives the functionality for playing tic-tac-toe game
 class TicTacToeServer{
     
         struct gameUserDetails *userDetails = NULL;
@@ -417,6 +447,8 @@ class TicTacToeServer{
         mutex mtx;
         
     public:
+    
+    // start the server for tic-tac-toe game
     void startServer(){
         cout<<"Tic-tac-toe server: waiting for connections..."<<endl;
         while(1){ 
@@ -432,8 +464,9 @@ class TicTacToeServer{
             myThread.detach();
         }
     }
+    
     private:
-
+    // add client if new client comes and calls the game logic
     int addClient(){
         int connfd = websocket.webSocketCreate();
         if(connfd == -1){
@@ -445,6 +478,7 @@ class TicTacToeServer{
         return connfd;
     }
 
+    // extract active users and give it in the string format
     char* extractActiveUsersString(int userid) {
         int length = 17;
         struct gameUserDetails* current = userDetails;
@@ -487,6 +521,7 @@ class TicTacToeServer{
         return result;
     }
 
+    // send active users to all the clients
     void activeuserssend(){
         struct gameUserDetails* current = userDetails;
         //printf("hello\n");
@@ -503,6 +538,7 @@ class TicTacToeServer{
         //printf("hello\n");
     }
 
+    // update details for the board and ingamewith for given userid1 and userid2 
     void updateDetails(int userid1,int userid2){
         struct gameUserDetails* current = userDetails;
         
@@ -528,6 +564,7 @@ class TicTacToeServer{
         }
     }
 
+   // remove client from the list and handling appropriately according to the in game with the client or not
     void handleClose(int connfd) {
         struct gameUserDetails* current = userDetails;
         struct gameUserDetails* prev = NULL;
@@ -560,7 +597,7 @@ class TicTacToeServer{
         pthread_exit(NULL);
     }
 
-
+   // check whether the board is in win or not
     char checkWin(char board[3][3])
     {
         for(int i=0;i<3;i++)
@@ -576,7 +613,9 @@ class TicTacToeServer{
             return 1;
         return 0;
     }
-
+    
+    
+    // check if the current board is tie or not
     int checkDraw(char board[3][3])
     {
         for(int i=0;i<3;i++)
@@ -590,6 +629,7 @@ class TicTacToeServer{
         return 1;
     }
 
+    // update board for movename (x or o) in the position board[i][j]
     void updateboard(int userid1,int userid2,int i,int j,char movename){
         struct gameUserDetails* current = userDetails;
         
@@ -604,6 +644,8 @@ class TicTacToeServer{
         }
     }
 
+
+    // send request if someone request the game to the other
     void handleGameRequest(int userid,int RequestUserid){
         struct gameUserDetails* current = userDetails;
         char arr[100];
@@ -618,6 +660,8 @@ class TicTacToeServer{
         }
     }
 
+
+    // handle each move and check whether the game ended or not
     void handleGameMove(int move,int senderUserid){
 
         struct gameUserDetails* current = userDetails;
@@ -683,7 +727,7 @@ class TicTacToeServer{
         
     }
 
-
+   // handle end game if the game is ended
     void handleEndGame(struct gameUserDetails* userDetail,int userid){
         char arr[100];		
         sprintf(arr,"gameOver => %d",userDetail->inGameWith);
@@ -697,6 +741,7 @@ class TicTacToeServer{
         activeuserssend();
     }
 
+    // send requestgame to all the userids 
     void handleRequestGame(int userid){
         struct gameUserDetails* current = userDetails;
         char arr[100];
@@ -711,6 +756,8 @@ class TicTacToeServer{
         }
     }
 
+
+    // handle acceptgame message to start the game or not
     void handleAcceptGame(int userid,int acceptUserid){
         struct gameUserDetails* current = userDetails;
         char arr[100];
@@ -753,6 +800,8 @@ class TicTacToeServer{
         activeuserssend();
     }
 
+
+    // display details of all the user's connfd
     void display_details(){
         struct gameUserDetails* current = userDetails;
 
@@ -763,6 +812,8 @@ class TicTacToeServer{
         }
     }
 
+
+    // handle the client based request received
     void handleGameClient(int connfd) {
         struct gameUserDetails* userDetail = userDetails;
         char arr[100];
