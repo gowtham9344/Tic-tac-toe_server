@@ -338,7 +338,7 @@ class WebSocketServer{
         }
 
         (*decodedData)[payload_length] = '\0';
-        //printf("#message length:%d\n",strlen(*decodedData));
+    
         return 0; // return code for normal data
     }
 
@@ -348,7 +348,6 @@ class WebSocketServer{
         int client_socket = tcp.connection_accepting();
         int len = tcp.getResponse(client_socket,buffer,2048);
         buffer[len] = '\0';
-       // printf("buffer:%s\n",buffer);
         
         handleWebsocketUpgrade(client_socket,buffer);
         return client_socket;
@@ -367,7 +366,7 @@ class WebSocketServer{
         int encoded_size = encodeWebsocketFrameHeader(fin, opcode, 0, strlen(payload), ( uint8_t *)payload, encoded_data);
 
         ssize_t bytes_sent = tcp.sendRequest(client_socket, encoded_data, encoded_size);
-        //cout<<"bytes_send"<<bytes_sent<<endl;
+    
         if (bytes_sent == -1) {
             perror("Send failed");
             return 0;
@@ -381,12 +380,10 @@ class WebSocketServer{
         uint8_t data[2048]; 
         size_t length = 2048;
         int len = 0;
-        //cout<<"length:"<<len<<endl;
+    
         if((len = tcp.getResponse(client_socket,data,length)) == -1){
             return -1; 
         }
-
-        //cout<<"length:"<<len<<endl;
 
         return processWebsocketFrame(data,length,decodedData,client_socket);
     }
@@ -414,17 +411,17 @@ struct gameUserDetails{
 };
 
 class TicTacToeServer{
-    public:
+    
         struct gameUserDetails *userDetails = NULL;
         WebSocketServer websocket = WebSocketServer();
         mutex mtx;
-
+        
+    public:
     void startServer(){
         cout<<"Tic-tac-toe server: waiting for connections..."<<endl;
         while(1){ 
-           // cout<<"client"<<endl;
+
             int connfd = addClient();
-            //printf("connfd:%d\n",connfd);
                 
             if(connfd == -1){
                 continue;
@@ -433,9 +430,9 @@ class TicTacToeServer{
             mtx.lock();
             thread myThread(&TicTacToeServer::handleGameClient,this,connfd);
             myThread.detach();
-           // cout<<"client1"<<endl;
         }
     }
+    private:
 
     int addClient(){
         int connfd = websocket.webSocketCreate();
@@ -455,9 +452,7 @@ class TicTacToeServer{
             return strdup("activeUsers  => ");
         }
         
-
         while (current != NULL) {
-           // cout<<"hello\n";
             if(userid != current->userid && !current->inGameWith){
                 length += 6;
             }
