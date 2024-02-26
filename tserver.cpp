@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <thread>
 #include <mutex>
+#include <map>
 
 #define SA struct sockaddr 
 #define MAGIC_STRING "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -416,33 +417,109 @@ class WebSocketServer{
     }
 };
 
-// structure for each client 
-struct gameUserDetails{
-	int userid;
-	int connfd;
-	int inGameWith;
-	char moveName;
-	char board[3][3];
-	struct gameUserDetails* next;
 
-    gameUserDetails(int userid,int connfd,int inGameWith){
-        this->userid = userid;
-        this->connfd = connfd;
-        this->inGameWith = inGameWith;
-        for(int i=0;i<3;i++){
-            for(int j=0;j<3;j++){
-                this->board[i][j] = ' ';
+class boardDetails{
+    char board[3][3];
+
+    public:
+    boardDetails(){
+        initializeBoard();
+    }
+
+    // check if the current board is tie or not
+    int checkDraw()
+    {
+        for(int i=0;i<3;i++)
+        {
+            for(int j=0;j<3;j++)
+            {
+                if(board[i][j] == ' ')
+                    return 0;
             }
         }
-        this->next = NULL;
+        return 1;
     }
+
+    // check whether the board is in win or not
+    int checkWin()
+    {
+        for(int i=0;i<3;i++)
+        {
+            if(board[i][0] != ' ' && board[i][0] == board[i][1] && board[i][1] == board[i][2])
+                return 1;
+
+            if(board[0][i] != ' ' && board[0][i] == board[1][i] && board[1][i] == board[2][i])
+                return 1;
+
+        }
+        if(board[0][0] != ' ' && board[0][0] == board[1][1] && board[1][1] == board[2][2])
+            return 1;
+
+        if(board[0][2] != ' ' && board[0][2] == board[1][1] && board[1][1] == board[2][0])
+            return 1;
+
+        return 0;
+    }
+
+
+    // used to initialize the board with the ' ' 
+    void initializeBoard(){
+
+        for(int i=0;i<3;i++){
+
+            for(int j=0;j<3;j++){
+
+                board[i][j] = ' ';
+            }
+        }
+    }
+
+    void updateBoard(int i,int j,char move){
+        board[i][j] = move;
+    }
+};
+
+// structure for each client 
+class gameUserDetails{
+    public:
+        int userid;
+        int connfd;
+        int inGameWith;
+        char moveName;
+        int boardNo;
+
+    gameUserDetails(){
+        this->userid = 0;
+        this->connfd = 0;
+        this->inGameWith = 0;
+        this->boardNo = 0;
+        this->moveName = ' ';
+    }
+
+    void updateUserid(int userid,int connfd){
+        this->userid = userid;
+        this->connfd = connfd;
+    }
+
+    void reinitialzeDetails(){
+        inGameWith = 0;
+        boardNo = 0;
+        moveName = ' ';
+    }
+
+    void updateDetails(int inGameWith,int boardNo,char moveName){
+        this->inGameWith = inGameWith;
+        this->boardNo = boardNo;
+        this->moveName = moveName;
+    }
+
 };
 
 
 // gives the functionality for playing tic-tac-toe game
 class TicTacToeServer{
-    
-        struct gameUserDetails *userDetails = NULL;
+        map<int,gameUserDetails> userDetails;
+        map<int,boardDetails> boards;
         WebSocketServer websocket = WebSocketServer();
         mutex mtx;
         
@@ -472,25 +549,22 @@ class TicTacToeServer{
         if(connfd == -1){
             return -1;
         }
-        struct gameUserDetails* userDetail = new gameUserDetails(connfd,connfd,0);
-        userDetail->next = userDetails;
-        userDetails = userDetail;
+        mtx.lock();
+        if(userDetails.find(connfd) == userDetails.end())
+            userDetails[connfd].updateUserid(connfd,connfd);
+        mtx.unlock();
+
         return connfd;
     }
 
     // extract active users and give it in the string format
     char* extractActiveUsersString(int userid) {
         int length = 17;
-        struct gameUserDetails* current = userDetails;
-        if (current == NULL) {
-            return strdup("activeUsers  => ");
-        }
-        
-        while (current != NULL) {
-            if(userid != current->userid && !current->inGameWith){
+
+        for(auto current:userDetails){
+            if(userid != current.second.userid && !current.second.inGameWith){
                 length += 6;
             }
-            current = current->next;
         }
         
         char* result = (char*)malloc(length + 10);
@@ -499,16 +573,13 @@ class TicTacToeServer{
             exit(EXIT_FAILURE);
         }
 
-        current = userDetails;
         char* pos = result;
         pos += snprintf(pos,length,"activeUsers => ");
-        while (current != NULL) {
-        
-            if(userid != current->userid && !(current->inGameWith)){
-                pos += snprintf(pos, length + 1, "%d, ", current->userid);
+       for(auto current:userDetails){
+            if(userid != current.second.userid && !current.second.inGameWith){
+                pos += snprintf(pos, length + 1, "%d, ", current.second.userid);
             }
-            current = current->next;
-        }
+       }
         
         if (length == 17) {
             return strdup("activeUsers => ");
@@ -523,278 +594,174 @@ class TicTacToeServer{
 
     // send active users to all the clients
     void activeuserssend(){
-        struct gameUserDetails* current = userDetails;
         //printf("hello\n");
-        while(current!=NULL){
+        for(auto current: userDetails){
             
-            if (websocket.sendWebsocketFrame(current->connfd, 1, 1, extractActiveUsersString(current->userid)) != 0) {
+            if (websocket.sendWebsocketFrame(current.second.connfd, 1, 1, extractActiveUsersString(current.second.userid)) != 0) {
                 cout<<"Error sending WebSocket frame"<<endl;
             }
             
-            current = current->next;
         }
-        
-        // display_details();
-        //printf("hello\n");
     }
 
-    // update details for the board and ingamewith for given userid1 and userid2 
+    // update details for the boardNo and ingamewith for given userid1 and userid2 
     void updateDetails(int userid1,int userid2){
-        struct gameUserDetails* current = userDetails;
-        
-        while(current != NULL){
-            if(userid1 == current->userid){
-                for(int i=0;i<3;i++){
-                        for(int j=0;j<3;j++){
-                            current->board[i][j] = ' ';
-                        }
-                    }
-                    
-                    current->inGameWith = 0;
-            }
-            if(userid2 == current->userid){
-                for(int i=0;i<3;i++){
-                        for(int j=0;j<3;j++){
-                            current->board[i][j] = ' ';
-                        }
-                }
-                current->inGameWith = 0;
-            }
-            current = current->next;
-        }
+        gameUserDetails& user1 = userDetails[userid1];
+        gameUserDetails& user2 = userDetails[userid2];
+        boards.erase(user1.boardNo);
+        user1.reinitialzeDetails();
+        user2.reinitialzeDetails();
     }
 
    // remove client from the list and handling appropriately according to the in game with the client or not
     void handleClose(int connfd) {
-        struct gameUserDetails* current = userDetails;
-        struct gameUserDetails* prev = NULL;
-
-        while (current != NULL) {
-            if(connfd == current->userid){
-                if(current->inGameWith != 0){
-                        char arr[100];
-                        sprintf(arr,"gameOver => %d",current->inGameWith);
-                        if (websocket.sendWebsocketFrame(current->inGameWith,1,1,arr) != 0) {
-                            cout<<"Error sending WebSocket frame"<<endl;
-                        }
-                        updateDetails(current->userid,current->inGameWith);
-                }
-                break;
+        gameUserDetails& current = userDetails[connfd];
+        if(current.inGameWith != 0){
+            char arr[100];
+            sprintf(arr,"gameOver => %d",current.inGameWith);
+            if (websocket.sendWebsocketFrame(current.inGameWith,1,1,arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
             }
-            prev = current;
-            current = current->next;
+            updateDetails(current.userid,current.inGameWith);
         }
         
-        if(prev == NULL){
-            userDetails = userDetails->next;
-        }
-        else{
-            prev->next = prev->next->next;
-        }
+        userDetails.erase(connfd);
         activeuserssend();
         close(connfd);
         mtx.unlock();
         pthread_exit(NULL);
     }
 
-   // check whether the board is in win or not
-    char checkWin(char board[3][3])
-    {
-        for(int i=0;i<3;i++)
-        {
-            if(board[i][0] != ' ' && board[i][0] == board[i][1] && board[i][1] == board[i][2])
-                return 1;
-            if(board[0][i] != ' ' && board[0][i] == board[1][i] && board[1][i] == board[2][i])
-                return 1;
-        }
-        if(board[0][0] != ' ' && board[0][0] == board[1][1] && board[1][1] == board[2][2])
-            return 1;
-        if(board[0][2] != ' ' && board[0][2] == board[1][1] && board[1][1] == board[2][0])
-            return 1;
-        return 0;
-    }
-    
-    
-    // check if the current board is tie or not
-    int checkDraw(char board[3][3])
-    {
-        for(int i=0;i<3;i++)
-        {
-            for(int j=0;j<3;j++)
-            {
-                if(board[i][j] == ' ')
-                    return 0;
-            }
-        }
-        return 1;
-    }
-
-    // update board for movename (x or o) in the position board[i][j]
-    void updateboard(int userid1,int userid2,int i,int j,char movename){
-        struct gameUserDetails* current = userDetails;
-        
-        while(current != NULL){
-            if(userid1 == current->userid){
-                current->board[i][j] = movename;
-            }
-            else if(userid2 == current->userid){
-                current->board[i][j] = movename;
-            }
-            current = current->next;
-        }
-    }
-
 
     // send request if someone request the game to the other
     void handleGameRequest(int userid,int RequestUserid){
-        struct gameUserDetails* current = userDetails;
+        gameUserDetails& current = userDetails[userid];
         char arr[100];
         sprintf(arr,"gameRequest => %d",RequestUserid);
-        while (current != NULL) {
-            if(userid == current->userid){
-                if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
-                    cout<<"Error sending WebSocket frame"<<endl;
-                }
-            }
-            current = current->next;
+        if (websocket.sendWebsocketFrame(current.connfd, 1, 1, arr) != 0) {
+            cout<<"Error sending WebSocket frame"<<endl;
         }
     }
 
 
     // handle each move and check whether the game ended or not
     void handleGameMove(int move,int senderUserid){
-
-        struct gameUserDetails* current = userDetails;
         char arr[100];
         int i = move/3,j = move%3;
-        
-        while (current != NULL) {
-            
-            if(senderUserid == current->userid){
-                updateboard(senderUserid,current->inGameWith,i,j,current->moveName);
-                if(checkWin(current->board)){
-                    sprintf(arr,"gameMove => %d",move);
-                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
-                        cout<<"Error sending WebSocket frame"<<endl;
-                    }
-                    sprintf(arr,"gameOver => %d",senderUserid);
-                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
-                        cout<<"Error sending WebSocket frame"<<endl;
-                    }
-                    if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
-                        cout<<"Error sending WebSocket frame"<<endl;
-                    }
-                    updateDetails(senderUserid,current->inGameWith);
-                    activeuserssend();
-                    break;
-                }
-                if(checkDraw(current->board)){
-                    sprintf(arr,"gameMove => %d",move);
-                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
-                        cout<<"Error sending WebSocket frame"<<endl;
-                    }
-                    sprintf(arr,"gameOver => %d",0);
-                    if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
-                        cout<<"Error sending WebSocket frame"<<endl;
-                    }
-                    if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
-                        cout<<"Error sending WebSocket frame"<<endl;
-                    }
-                    
-                    updateDetails(senderUserid,current->inGameWith);
-                    activeuserssend();
-                    break;
-                }
-                sprintf(arr,"gameMove => %d",move);
-                        
-                if (websocket.sendWebsocketFrame(current->inGameWith, 1, 1, arr) != 0) {
-                    cout<<"Error sending WebSocket frame"<<endl;
-                }
-                
-                sprintf(arr,"yourTurn");
-                if(websocket.sendWebsocketFrame(current->inGameWith,1,1, arr) != 0){
-                    cout<<"Error sending WebSocket frame"<<endl;
-                }
-                
-                sprintf(arr,"OpponentTurn");
-                if(websocket.sendWebsocketFrame(current->connfd,1,1, arr) != 0){
-                    cout<<"Error sending WebSocket frame"<<endl;
-                }
-                break;
+        gameUserDetails& current = userDetails[senderUserid];
+        boardDetails& board = boards[current.boardNo];
+        board.updateBoard(i,j,current.moveName);
+        if(board.checkWin()){
+            sprintf(arr,"gameMove => %d",move);
+            if (websocket.sendWebsocketFrame(current.inGameWith, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
             }
-            current = current->next;
+            sprintf(arr,"gameOver => %d",senderUserid);
+            if (websocket.sendWebsocketFrame(current.inGameWith, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            if (websocket.sendWebsocketFrame(current.connfd, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            updateDetails(senderUserid,current.inGameWith);
+            activeuserssend();
         }
-        
+        else if(board.checkDraw()){
+            sprintf(arr,"gameMove => %d",move);
+            if (websocket.sendWebsocketFrame(current.inGameWith, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            sprintf(arr,"gameOver => %d",0);
+            if (websocket.sendWebsocketFrame(current.inGameWith, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            if (websocket.sendWebsocketFrame(current.connfd, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            
+            updateDetails(senderUserid,current.inGameWith);
+            activeuserssend();
+        }
+        else{
+            sprintf(arr,"gameMove => %d",move);
+                        
+            if (websocket.sendWebsocketFrame(current.inGameWith, 1, 1, arr) != 0) {
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            
+            sprintf(arr,"yourTurn");
+            if(websocket.sendWebsocketFrame(current.inGameWith,1,1, arr) != 0){
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+            
+            sprintf(arr,"OpponentTurn");
+            if(websocket.sendWebsocketFrame(current.connfd,1,1, arr) != 0){
+                cout<<"Error sending WebSocket frame"<<endl;
+            }
+        }    
+           
     }
 
    // handle end game if the game is ended
-    void handleEndGame(struct gameUserDetails* userDetail,int userid){
+    void handleEndGame(int userid){
         char arr[100];		
-        sprintf(arr,"gameOver => %d",userDetail->inGameWith);
-        if (websocket.sendWebsocketFrame(userDetail->inGameWith, 1, 1, arr) != 0) {
+        gameUserDetails& userDetail = userDetails[userid];
+        sprintf(arr,"gameOver => %d",userDetail.inGameWith);
+        if (websocket.sendWebsocketFrame(userDetail.connfd, 1, 1, arr) != 0) {
             cout<<"Error sending WebSocket frame"<<endl;
         }
-        if (websocket.sendWebsocketFrame(userDetail->connfd, 1, 1, arr) != 0) {
+        if (websocket.sendWebsocketFrame(userDetail.inGameWith, 1, 1, arr) != 0) {
             cout<<"Error sending WebSocket frame"<<endl;
         }
-        updateDetails(userDetail->inGameWith,userDetail->connfd);
+        updateDetails(userDetail.inGameWith,userDetail.connfd);
         activeuserssend();
     }
 
     // send requestgame to all the userids 
     void handleRequestGame(int userid){
-        struct gameUserDetails* current = userDetails;
         char arr[100];
         sprintf(arr,"gameRequest => %d",userid);
-        while (current != NULL) {
-            if(userid != current->userid && current->inGameWith == 0){
-                if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
+        for(auto userDetail: userDetails){
+            if(userid != userDetail.second.userid && userDetail.second.inGameWith == 0){
+                if (websocket.sendWebsocketFrame(userDetail.second.connfd, 1, 1, arr) != 0) {
                     cout<<"Error sending WebSocket frame"<<endl;
                 }
             }
-            current = current->next;
         }
     }
 
 
     // handle acceptgame message to start the game or not
     void handleAcceptGame(int userid,int acceptUserid){
-        struct gameUserDetails* current = userDetails;
         char arr[100];
         sprintf(arr,"gameStart => %d, o",acceptUserid);
-        int flag = 0;
-        struct gameUserDetails* accepter = NULL;
 
-        while (current != NULL) {
-            if(userid == current->userid && current->inGameWith == 0){
-                if (websocket.sendWebsocketFrame(current->connfd, 1, 1, arr) != 0) {
+        if (userDetails.find(userid) != userDetails.end()) {
+            gameUserDetails& current = userDetails[userid];
+            if(current.inGameWith == 0){
+                gameUserDetails& accepter = userDetails[acceptUserid];
+
+                if (websocket.sendWebsocketFrame(current.connfd, 1, 1, arr) != 0) {
                     cout<<"Error sending WebSocket frame"<<endl;
                 }
-                current->inGameWith = acceptUserid;
-                current->moveName = 'o';
-                flag = 1;
+
+                boards[current.userid].initializeBoard();
+                current.updateDetails(acceptUserid,userid,'o');
             
                 sprintf(arr,"OpponentTurn");
-                if(websocket.sendWebsocketFrame(current->connfd,1,1, arr) != 0){
+                if(websocket.sendWebsocketFrame(current.connfd,1,1, arr) != 0){
                     cout<<"Error sending WebSocket frame"<<endl;
                 }
-            }
-            if(acceptUserid == current->userid){
-                accepter = current;
-            }
-            current = current->next;
-        }
-        
-        if(flag){
-            sprintf(arr,"gameStart => %d, x",userid);
-            accepter->inGameWith = userid;
-            accepter->moveName = 'x';
-            if (websocket.sendWebsocketFrame(acceptUserid, 1, 1, arr) != 0) {
-                cout<<"Error sending WebSocket frame"<<endl;
-            }
-            sprintf(arr,"yourTurn");
-            if(websocket.sendWebsocketFrame(acceptUserid,1,1, arr) != 0){
-               cout<<"Error sending WebSocket frame"<<endl;
+
+                sprintf(arr,"gameStart => %d, x",userid);
+                accepter.updateDetails(userid,userid,'x');
+                if (websocket.sendWebsocketFrame(acceptUserid, 1, 1, arr) != 0) {
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
+                sprintf(arr,"yourTurn");
+                if(websocket.sendWebsocketFrame(acceptUserid,1,1, arr) != 0){
+                    cout<<"Error sending WebSocket frame"<<endl;
+                }
             }
         }
         activeuserssend();
@@ -803,23 +770,21 @@ class TicTacToeServer{
 
     // display details of all the user's connfd
     void display_details(){
-        struct gameUserDetails* current = userDetails;
 
         cout<<"\n\ncurrent user details\n\n";
-        while(current!=NULL){
-            cout<<current->connfd<<endl;
-            current = current->next;
+        for(auto current: userDetails){
+            cout<<current.second.userid<<endl;
         }
     }
 
 
     // handle the client based request received
     void handleGameClient(int connfd) {
-        struct gameUserDetails* userDetail = userDetails;
+        gameUserDetails& userDetail = userDetails[connfd];
         char arr[100];
 
-        sprintf(arr, "userid => %d", userDetail->userid);
-        if (websocket.sendWebsocketFrame(userDetail->connfd, 1, 1, arr) != 0) {
+        sprintf(arr, "userid => %d", userDetail.userid);
+        if (websocket.sendWebsocketFrame(userDetail.connfd, 1, 1, arr) != 0) {
             cout << "Error sending WebSocket frame" << endl;
         }
         mtx.unlock();
@@ -830,10 +795,9 @@ class TicTacToeServer{
                 char* decodedData = NULL;
                 int flag = 0;
 
-                if ((flag = websocket.recvWebSocketFrame(&decodedData, userDetail->connfd)) == -1) {
-                    //cout<<flag<<endl;
+                if ((flag = websocket.recvWebSocketFrame(&decodedData, userDetail.connfd)) == -1) {
                     mtx.lock();
-                    handleClose(userDetail->connfd);
+                    handleClose(userDetail.connfd);
                     break;
                 }
 
@@ -844,9 +808,9 @@ class TicTacToeServer{
 
                 // close frame
                 if (flag == 2) {
-                    websocket.sendCloseFrame(userDetail->connfd);
+                    websocket.sendCloseFrame(userDetail.connfd);
                     mtx.lock();
-                    handleClose(userDetail->connfd);
+                    handleClose(userDetail.connfd);
                     break;
                 }
 
@@ -858,7 +822,7 @@ class TicTacToeServer{
                     if (ptr = strstr(decodedData, "gameRequest")) {
                         ptr += 15;
                         mtx.lock();
-                        handleGameRequest(atoi(ptr), userDetail->connfd);
+                        handleGameRequest(atoi(ptr), userDetail.connfd);
                         free(decodedData);
                         mtx.unlock();
                         continue;
@@ -866,7 +830,7 @@ class TicTacToeServer{
 
                     if (ptr = strstr(decodedData, "requestGame")) {
                         mtx.lock();
-                        handleRequestGame(userDetail->connfd);
+                        handleRequestGame(userDetail.connfd);
                         free(decodedData);
                         mtx.unlock();
                         continue;
@@ -875,7 +839,7 @@ class TicTacToeServer{
                     if (ptr = strstr(decodedData, "acceptGameRequest")) {
                         ptr += 21;
                         mtx.lock();
-                        handleAcceptGame(atoi(ptr), userDetail->connfd);
+                        handleAcceptGame(atoi(ptr), userDetail.connfd);
                         free(decodedData);
                         mtx.unlock();
                         continue;
@@ -884,7 +848,7 @@ class TicTacToeServer{
                     if (ptr = strstr(decodedData, "gameMove")) {
                         ptr += 12;
                         mtx.lock();
-                        handleGameMove(atoi(ptr), userDetail->connfd);
+                        handleGameMove(atoi(ptr), userDetail.connfd);
                         free(decodedData);
                         mtx.unlock();
                         continue;
@@ -892,14 +856,14 @@ class TicTacToeServer{
 
                     if (ptr = strstr(decodedData, "endGame")) {
                         mtx.lock();
-                        handleEndGame(userDetail, userDetail->connfd);
+                        handleEndGame(userDetail.connfd);
                         free(decodedData);
                         mtx.unlock();
                         continue;
                     }
 
                     if (ptr = strstr(decodedData, "activeUsers")) {
-                        if (websocket.sendWebsocketFrame(userDetail->connfd, 1, 1, extractActiveUsersString(userDetail->userid)) != 0) {
+                        if (websocket.sendWebsocketFrame(userDetail.connfd, 1, 1, extractActiveUsersString(userDetail.userid)) != 0) {
                             cout << "Error sending WebSocket frame" << endl;
                         }
                         free(decodedData);
@@ -908,7 +872,7 @@ class TicTacToeServer{
 
                     if(strlen(decodedData) == 0){
                         mtx.lock();
-                        handleClose(userDetail->connfd);
+                        handleClose(userDetail.connfd);
                         mtx.unlock();
                         break;
                     }
@@ -918,8 +882,8 @@ class TicTacToeServer{
                         free(decodedData);
                 }
         }
-        close(userDetail->connfd);
-        free(userDetail);
+        close(userDetail.connfd);
+        userDetails.erase(userDetail.connfd);
     }
 
 
