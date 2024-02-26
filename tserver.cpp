@@ -474,6 +474,7 @@ class boardDetails{
         }
     }
 
+    // update the move in that board in position i,j
     void updateBoard(int i,int j,char move){
         board[i][j] = move;
     }
@@ -524,7 +525,6 @@ class TicTacToeServer{
         mutex mtx;
         
     public:
-    
     // start the server for tic-tac-toe game
     void startServer(){
         cout<<"Tic-tac-toe server: waiting for connections..."<<endl;
@@ -543,7 +543,7 @@ class TicTacToeServer{
     }
     
     private:
-    // add client if new client comes and calls the game logic
+    // add client if new client comes into the map
     int addClient(){
         int connfd = websocket.webSocketCreate();
         if(connfd == -1){
@@ -593,8 +593,7 @@ class TicTacToeServer{
     }
 
     // send active users to all the clients
-    void activeuserssend(){
-        //printf("hello\n");
+    void activeUsersSend(){
         for(auto current: userDetails){
             
             if (websocket.sendWebsocketFrame(current.second.connfd, 1, 1, extractActiveUsersString(current.second.userid)) != 0) {
@@ -604,7 +603,7 @@ class TicTacToeServer{
         }
     }
 
-    // update details for the boardNo and ingamewith for given userid1 and userid2 
+    // update details for given userid1 and userid2 and erase that board
     void updateDetails(int userid1,int userid2){
         gameUserDetails& user1 = userDetails[userid1];
         gameUserDetails& user2 = userDetails[userid2];
@@ -613,7 +612,7 @@ class TicTacToeServer{
         user2.reinitialzeDetails();
     }
 
-   // remove client from the list and handling appropriately according to the in game with the client or not
+    // remove client from the list and handling appropriately according to the in game with the client or not
     void handleClose(int connfd) {
         gameUserDetails& current = userDetails[connfd];
         if(current.inGameWith != 0){
@@ -626,7 +625,7 @@ class TicTacToeServer{
         }
         
         userDetails.erase(connfd);
-        activeuserssend();
+        activeUsersSend();
         close(connfd);
         mtx.unlock();
         pthread_exit(NULL);
@@ -664,7 +663,7 @@ class TicTacToeServer{
                 cout<<"Error sending WebSocket frame"<<endl;
             }
             updateDetails(senderUserid,current.inGameWith);
-            activeuserssend();
+            activeUsersSend();
         }
         else if(board.checkDraw()){
             sprintf(arr,"gameMove => %d",move);
@@ -680,7 +679,7 @@ class TicTacToeServer{
             }
             
             updateDetails(senderUserid,current.inGameWith);
-            activeuserssend();
+            activeUsersSend();
         }
         else{
             sprintf(arr,"gameMove => %d",move);
@@ -714,7 +713,7 @@ class TicTacToeServer{
             cout<<"Error sending WebSocket frame"<<endl;
         }
         updateDetails(userDetail.inGameWith,userDetail.connfd);
-        activeuserssend();
+        activeUsersSend();
     }
 
     // send requestgame to all the userids 
@@ -764,17 +763,7 @@ class TicTacToeServer{
                 }
             }
         }
-        activeuserssend();
-    }
-
-
-    // display details of all the user's connfd
-    void display_details(){
-
-        cout<<"\n\ncurrent user details\n\n";
-        for(auto current: userDetails){
-            cout<<current.second.userid<<endl;
-        }
+        activeUsersSend();
     }
 
 
@@ -788,7 +777,7 @@ class TicTacToeServer{
             cout << "Error sending WebSocket frame" << endl;
         }
         mtx.unlock();
-        activeuserssend();
+        activeUsersSend();
         
 
             while (1) {
