@@ -417,7 +417,7 @@ class WebSocketServer{
     }
 };
 
-
+// helps board with functionality of that board for tic_tac_toe server
 class boardDetails{
     char board[3][3];
 
