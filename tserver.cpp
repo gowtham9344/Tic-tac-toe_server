@@ -488,7 +488,7 @@ class gameUserDetails{
         int inGameWith;
         char moveName;
         int boardNo;
-
+        
     gameUserDetails(){
         this->userid = 0;
         this->connfd = 0;
@@ -497,17 +497,20 @@ class gameUserDetails{
         this->moveName = ' ';
     }
 
+    // update user id and connfd
     void updateUserid(int userid,int connfd){
         this->userid = userid;
         this->connfd = connfd;
     }
 
+    // reintialize inGameWith , boardNo and MoveName with default value
     void reinitialzeDetails(){
         inGameWith = 0;
         boardNo = 0;
         moveName = ' ';
     }
 
+    //update details for the inGameWith , boardNo and MoveName
     void updateDetails(int inGameWith,int boardNo,char moveName){
         this->inGameWith = inGameWith;
         this->boardNo = boardNo;
@@ -525,6 +528,7 @@ class TicTacToeServer{
         mutex mtx;
         
     public:
+
     // start the server for tic-tac-toe game
     void startServer(){
         cout<<"Tic-tac-toe server: waiting for connections..."<<endl;
@@ -543,7 +547,7 @@ class TicTacToeServer{
     }
     
     private:
-    // add client if new client comes into the map
+    // add new client into the map names userDetails
     int addClient(){
         int connfd = websocket.webSocketCreate();
         if(connfd == -1){
