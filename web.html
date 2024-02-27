@@ -74,31 +74,37 @@
         let moveSymbol = '';
         let contentSplit = [];
 
+        // connect to the tic-tac-toe server created using the websocket
         function connect() {
 
             ws = new WebSocket('ws://127.0.0.1:8000');
 
             console.log("handshake completed");
 
+            //if web socket is opened remove the connect button and show the game-section
             ws.onopen = function (event) {
                 document.getElementById('connection-section').style.display = 'none';
                 document.getElementById('game-section').style.display = 'block';
             };
 
+            //messages will be received from the server
             ws.onmessage = function (event) {
                 const data = event.data;
                 handleWebSocketMessage(data);
             };
 
+            //if closed means connection console log message will be displayed for close
             ws.onclose = function (event) {
                 console.log('Connection closed');
             };
 
+            //websocket errors will be displayed
             ws.onerror = function (event) {
                 console.error('WebSocket error:', event);
             };
         }
 
+        //based on the data parse to do the below functionality
         function handleWebSocketMessage(data) {
             const parts = data.split(' => ');
             const command = parts[0];
@@ -149,11 +155,13 @@
             }
         }
         
+        //display my move message
         function displayYourMove(){
             const yourMoveElement = document.getElementById('move-details');
             yourMoveElement.innerHTML = 'This is your turn Please select some tile to Move';
         }
         
+        //remove request, getusers, requestgame buttons from the user ui
         function disableFunctions(){
             const yourMoveElement = document.getElementById('requests');
             yourMoveElement.style.display = 'none';
@@ -165,20 +173,24 @@
             yourMoveElement3.style.display = 'inline';
         }
         
+        // display opponent make move in the ui
         function displayMoves(content,Opposymbol){
             makemove(content,Opposymbol);
         }
         
+        // display opponent move 
         function displayOpponentMove(){
             const yourMoveElement = document.getElementById('move-details');
             yourMoveElement.innerHTML = `This is opponent turn with user id is ${opuser}. Please wait until he moves`;
         }
         
+        //display the game board
         function displayGame(){
         	const displayGameElement = document.getElementById('game-board');
         	displayGameElement.style.display = 'block';
         }
         
+        //display whether winner or not or tie to the user and handle the disable and enable functions accordingly
         function displayWinner(content){
         	const displayGameElement = document.getElementById('move-details');
         	const yourMoveElement3 = document.getElementById('endgame');
@@ -194,7 +206,7 @@
         		displayGameElement.innerHTML = 'Better luck next time';
         	}
         	
-        	
+        	//timeout is set to display the winner details (default time set to 10000 milliseconds = 10 seconds)
         	setTimeout(function(){
                     let displayGameElement = document.getElementById('move-details');
                     displayGameElement.innerHTML = '';
@@ -209,12 +221,14 @@
 			        displayNotGame();
         	},10000);
         }
-
+     
+    //turn off the display of the board to the user
 	function displayNotGame(){
 		const displayGameElement = document.getElementById('game-board');
         	displayGameElement.style.display = 'none';
 	}
 	
+        //update the active users list to the ui
         function updateActiveUsersList() {
             const activeUsersElement = document.getElementById('active-users');
             activeUsersElement.innerHTML = '';
@@ -231,11 +245,13 @@
             });
         }
         
-         function updateActiveUsersListNoUsers() {
+        //update the activeUsers list to display No active users
+        function updateActiveUsersListNoUsers() {
             const activeUsersElement = document.getElementById('active-users');
             activeUsersElement.innerHTML = "NoActiveUsers";
         }
 
+        //update the list of requested users
         function updateGameRequestsList() {
             const gameRequestsElement = document.getElementById('game-requests');
             gameRequestsElement.innerHTML = '';
@@ -251,28 +267,35 @@
                 gameRequestsElement.appendChild(divItem);
             });
         }
+
+        //send activeUsers message to server for requesting current active users
         function getActiveUsers(){
             ws.send("activeUsers");
         }
 
+        //send gameRequest message for the corresponding user
         function sendGameRequest(toUser) {
             ws.send(`gameRequest => ${toUser}`);
         }
 
+        //send acceptGameRequest message for the corresponding user
         function acceptGameRequest(fromUser) {
             ws.send(`acceptGameRequest => ${fromUser}`);
         }
 
+        //send request game message to the server
         function requestGame() {
             ws.send('requestGame');
         }
 
+        //display terminate message to the user and send close frame to the server
         function terminateConnection() {
             const TerminateElement = document.getElementById('game-section');
             TerminateElement.innerHTML = 'you are disconnected please refresh the page';
             ws.close();
         }
 
+        //makemove is a function to change the current board value in the array
         function makemove(i,moveName) {
             const gameRequestsElement = document.getElementById(`square${i}`);
             gameRequestsElement.innerHTML = moveName;
@@ -282,6 +305,7 @@
             }
         }
         
+        //enable the buttons of the tic-tac-toe board
         function enablebuttons(){
         	let i = 0;
         	for(i = 0 ;i < 9;i++){
@@ -292,6 +316,7 @@
         	}
         }
         
+        //initailize the board to default board
         function defaultboard(){
         	let i = 0;
         	for(i = 0 ;i < 9;i++){
@@ -300,6 +325,7 @@
         	}
         }
         
+        //disable the functionality of the buttons for tic-tac-toe board
         function disablebuttons(){
         	let i = 0;
         	for(i = 0 ;i < 9;i++){
@@ -307,6 +333,7 @@
             		gameRequestsElement.disabled = true;
         	}
         }
+        // send endgame message to the server
         function Endgame(){
         	ws.send("endGame");
         }

@@ -234,50 +234,49 @@ class WebSocketServer{
     }
 
 
-   // calculate the sha1 for given clientkey and encode to the base64 format to get acceptket to be send in the handshaking process of 
-   // websocket connection
+   // calculate the sha1 for given clientkey and encode to the base64 format to get acceptket to be send in the handshaking process of websocket connection
     void calculateWebSocketAccept(const char *clientKey, char *acceptKey) {
-	char combinedKey[1024] = "";
-	strcpy(combinedKey, clientKey);
-	//cout<<"clientkey:"<<clientKey<<endl;
-	strcat(combinedKey, MAGIC_STRING);
-	//cout<<"combinedkey:"<<combinedKey<<endl;
-	memset(acceptKey,'\0',50);
-	unsigned char sha1Hash[SHA_DIGEST_LENGTH];
-	SHA1(reinterpret_cast<const unsigned char*>(combinedKey), strlen(combinedKey), sha1Hash);
+        char combinedKey[1024] = "";
+        strcpy(combinedKey, clientKey);
+        //cout<<"clientkey:"<<clientKey<<endl;
+        strcat(combinedKey, MAGIC_STRING);
+        //cout<<"combinedkey:"<<combinedKey<<endl;
+        memset(acceptKey,'\0',50);
+        unsigned char sha1Hash[SHA_DIGEST_LENGTH];
+        SHA1(reinterpret_cast<const unsigned char*>(combinedKey), strlen(combinedKey), sha1Hash);
 
-	BIO* b64 = BIO_new(BIO_f_base64());
-	BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+        BIO* b64 = BIO_new(BIO_f_base64());
+        BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
 
-	BIO* bio = BIO_new(BIO_s_mem());
-	BIO_push(b64, bio);
+        BIO* bio = BIO_new(BIO_s_mem());
+        BIO_push(b64, bio);
 
-	BIO_write(b64, sha1Hash, SHA_DIGEST_LENGTH);
-	BIO_flush(b64);
+        BIO_write(b64, sha1Hash, SHA_DIGEST_LENGTH);
+        BIO_flush(b64);
 
-	BUF_MEM* bptr;
-	BIO_get_mem_ptr(b64, &bptr);
+        BUF_MEM* bptr;
+        BIO_get_mem_ptr(b64, &bptr);
 
-	strcpy(acceptKey, bptr->data);
+        strcpy(acceptKey, bptr->data);
 
-	size_t len = strlen(acceptKey);
-	
-	if (len > 0 && acceptKey[len - 1] == '\n') {
-	acceptKey[len - 1] = '\0';
-	}
-	acceptKey[28] = '\0';
-	//cout<<"acceptKey:"<<acceptKey<<endl;
+        size_t len = strlen(acceptKey);
+        
+        if (len > 0 && acceptKey[len - 1] == '\n') {
+        acceptKey[len - 1] = '\0';
+        }
+        acceptKey[28] = '\0';
+        //cout<<"acceptKey:"<<acceptKey<<endl;
 
-	BIO_free_all(b64);
+        BIO_free_all(b64);
     }
 
 
    // receive upgrade message and send the correct message for the given upgrade request.
     void handleWebsocketUpgrade(int client_socket, char *request) {
 
-           if (strstr(request, "Upgrade: websocket") == nullptr) {
-		std::cerr << "Not a WebSocket upgrade request" << std::endl;
-		return;
+        if (strstr(request, "Upgrade: websocket") == nullptr) {
+            std::cerr << "Not a WebSocket upgrade request" << std::endl;
+            return;
 	    }
 
 	    const char* key_start = strstr(request, "Sec-WebSocket-Key: ") + 19;
@@ -299,9 +298,9 @@ class WebSocketServer{
 	    int len = sprintf(response, upgrade_response_format, accept_key);
 	    response[len] = '\0';
 	    //cout<<"response:"<<response<<endl;
-            len = tcp.sendRequest(client_socket, response, strlen(response));
-            //cout<<"length:"<<len<<endl;
-            cout<<"WebSocket handshake complete"<<endl;
+        len = tcp.sendRequest(client_socket, response, strlen(response));
+        //cout<<"length:"<<len<<endl;
+        cout<<"WebSocket handshake complete"<<endl;
     }
 
 
@@ -461,7 +460,6 @@ class boardDetails{
         return 0;
     }
 
-
     // used to initialize the board with the ' ' 
     void initializeBoard(){
 
@@ -488,7 +486,7 @@ class gameUserDetails{
         int inGameWith;
         char moveName;
         int boardNo;
-        
+
     gameUserDetails(){
         this->userid = 0;
         this->connfd = 0;
@@ -579,11 +577,11 @@ class TicTacToeServer{
 
         char* pos = result;
         pos += snprintf(pos,length,"activeUsers => ");
-       for(auto current:userDetails){
+        for(auto current:userDetails){
             if(userid != current.second.userid && !current.second.inGameWith){
                 pos += snprintf(pos, length + 1, "%d, ", current.second.userid);
             }
-       }
+        }
         
         if (length == 17) {
             return strdup("activeUsers => ");
@@ -635,7 +633,6 @@ class TicTacToeServer{
         pthread_exit(NULL);
     }
 
-
     // send request if someone request the game to the other
     void handleGameRequest(int userid,int RequestUserid){
         gameUserDetails& current = userDetails[userid];
@@ -645,7 +642,6 @@ class TicTacToeServer{
             cout<<"Error sending WebSocket frame"<<endl;
         }
     }
-
 
     // handle each move and check whether the game ended or not
     void handleGameMove(int move,int senderUserid){
@@ -733,7 +729,6 @@ class TicTacToeServer{
         }
     }
 
-
     // handle acceptgame message to start the game or not
     void handleAcceptGame(int userid,int acceptUserid){
         char arr[100];
@@ -771,7 +766,7 @@ class TicTacToeServer{
     }
 
 
-    // handle the client based request received
+    // handle the client based on request received
     void handleGameClient(int connfd) {
         gameUserDetails& userDetail = userDetails[connfd];
         char arr[100];
@@ -783,102 +778,99 @@ class TicTacToeServer{
         mtx.unlock();
         activeUsersSend();
         
+        while (1) {
+            char* decodedData = NULL;
+            int flag = 0;
 
-            while (1) {
-                char* decodedData = NULL;
-                int flag = 0;
+            if ((flag = websocket.recvWebSocketFrame(&decodedData, userDetail.connfd)) == -1) {
+                mtx.lock();
+                handleClose(userDetail.connfd);
+                break;
+            }
 
-                if ((flag = websocket.recvWebSocketFrame(&decodedData, userDetail.connfd)) == -1) {
+            // ping frame
+            if (flag == 1) {
+                continue;
+            }
+
+            // close frame
+            if (flag == 2) {
+                websocket.sendCloseFrame(userDetail.connfd);
+                mtx.lock();
+                handleClose(userDetail.connfd);
+                break;
+            }
+
+            if (decodedData) {
+                cout << "Received message from client: " << decodedData << endl;
+
+                char* ptr = NULL;
+
+                if (ptr = strstr(decodedData, "gameRequest")) {
+                    ptr += 15;
                     mtx.lock();
-                    handleClose(userDetail.connfd);
-                    break;
-                }
-
-                // ping frame
-                if (flag == 1) {
+                    handleGameRequest(atoi(ptr), userDetail.connfd);
+                    free(decodedData);
+                    mtx.unlock();
                     continue;
                 }
 
-                // close frame
-                if (flag == 2) {
-                    websocket.sendCloseFrame(userDetail.connfd);
+                if (ptr = strstr(decodedData, "requestGame")) {
+                    mtx.lock();
+                    handleRequestGame(userDetail.connfd);
+                    free(decodedData);
+                    mtx.unlock();
+                    continue;
+                }
+
+                if (ptr = strstr(decodedData, "acceptGameRequest")) {
+                    ptr += 21;
+                    mtx.lock();
+                    handleAcceptGame(atoi(ptr), userDetail.connfd);
+                    free(decodedData);
+                    mtx.unlock();
+                    continue;
+                }
+
+                if (ptr = strstr(decodedData, "gameMove")) {
+                    ptr += 12;
+                    mtx.lock();
+                    handleGameMove(atoi(ptr), userDetail.connfd);
+                    free(decodedData);
+                    mtx.unlock();
+                    continue;
+                }
+
+                if (ptr = strstr(decodedData, "endGame")) {
+                    mtx.lock();
+                    handleEndGame(userDetail.connfd);
+                    free(decodedData);
+                    mtx.unlock();
+                    continue;
+                }
+
+                if (ptr = strstr(decodedData, "activeUsers")) {
+                    if (websocket.sendWebsocketFrame(userDetail.connfd, 1, 1, extractActiveUsersString(userDetail.userid)) != 0) {
+                        cout << "Error sending WebSocket frame" << endl;
+                    }
+                    free(decodedData);
+                    continue;
+                }
+
+                if(strlen(decodedData) == 0){
                     mtx.lock();
                     handleClose(userDetail.connfd);
+                    mtx.unlock();
                     break;
                 }
 
-                if (decodedData) {
-                    cout << "Received message from client: " << decodedData << endl;
-
-                    char* ptr = NULL;
-
-                    if (ptr = strstr(decodedData, "gameRequest")) {
-                        ptr += 15;
-                        mtx.lock();
-                        handleGameRequest(atoi(ptr), userDetail.connfd);
-                        free(decodedData);
-                        mtx.unlock();
-                        continue;
-                    }
-
-                    if (ptr = strstr(decodedData, "requestGame")) {
-                        mtx.lock();
-                        handleRequestGame(userDetail.connfd);
-                        free(decodedData);
-                        mtx.unlock();
-                        continue;
-                    }
-
-                    if (ptr = strstr(decodedData, "acceptGameRequest")) {
-                        ptr += 21;
-                        mtx.lock();
-                        handleAcceptGame(atoi(ptr), userDetail.connfd);
-                        free(decodedData);
-                        mtx.unlock();
-                        continue;
-                    }
-
-                    if (ptr = strstr(decodedData, "gameMove")) {
-                        ptr += 12;
-                        mtx.lock();
-                        handleGameMove(atoi(ptr), userDetail.connfd);
-                        free(decodedData);
-                        mtx.unlock();
-                        continue;
-                    }
-
-                    if (ptr = strstr(decodedData, "endGame")) {
-                        mtx.lock();
-                        handleEndGame(userDetail.connfd);
-                        free(decodedData);
-                        mtx.unlock();
-                        continue;
-                    }
-
-                    if (ptr = strstr(decodedData, "activeUsers")) {
-                        if (websocket.sendWebsocketFrame(userDetail.connfd, 1, 1, extractActiveUsersString(userDetail.userid)) != 0) {
-                            cout << "Error sending WebSocket frame" << endl;
-                        }
-                        free(decodedData);
-                        continue;
-                    }
-
-                    if(strlen(decodedData) == 0){
-                        mtx.lock();
-                        handleClose(userDetail.connfd);
-                        mtx.unlock();
-                        break;
-                    }
-
-
-                    if (!strlen(decodedData))
-                        free(decodedData);
-                }
+                if (!strlen(decodedData))
+                    free(decodedData);
+            }
         }
         close(userDetail.connfd);
         userDetails.erase(userDetail.connfd);
     }
-
 
 };
 
